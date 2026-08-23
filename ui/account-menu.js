@@ -268,7 +268,8 @@ function CodexMuxAccountMenu() {
       setError("");
       if (nextAccounts.some((account) => account.connected)) setLoading(false);
     } catch (requestError) {
-      setError(requestError.message);
+      const cachedAccounts = globalThis.__codexMuxConnectedAccounts || [];
+      if (cachedAccounts.length === 0) setError(requestError.message);
       setLoading(false);
     }
   }, []);
