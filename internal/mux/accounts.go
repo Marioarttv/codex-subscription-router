@@ -140,6 +140,48 @@ func (m *Multiplexer) UpdateAccount(ctx context.Context, id string, label *strin
 	return m.accountSnapshot(ctx, id)
 }
 
+func (m *Multiplexer) RemoveAccount(ctx context.Context, id string) error {
+	account, ok := m.store.Account(id)
+	if !ok {
+		return fmt.Errorf("account %q not found", id)
+	}
+	if account.Controller {
+		return errors.New("the Primary account cannot be removed")
+	}
+	if count := m.store.ThreadCounts()[id]; count != 0 {
+		return fmt.Errorf("%s cannot be removed because it owns %d task(s)", account.Label, count)
+	}
+
+	m.childrenMu.Lock()
+	child := m.children[id]
+	delete(m.children, id)
+	m.childrenMu.Unlock()
+	if child != nil {
+		_ = child.Close()
+	}
+
+	removed, err := m.store.RemoveAccount(id)
+	if err != nil {
+		if child != nil {
+			_, _ = m.startChild(ctx, account)
+		}
+		return err
+	}
+	m.profileMu.Lock()
+	delete(m.profileCache, id)
+	m.profileMu.Unlock()
+	m.invalidateResetCreditCache(id)
+	m.resetPreviewMu.Lock()
+	delete(m.resetPreviews, id)
+	m.resetPreviewMu.Unlock()
+	m.publish(Event{
+		Type:      "account-removed",
+		AccountID: id,
+		Message:   fmt.Sprintf("Removed %s", removed.Label),
+	})
+	return nil
+}
+
 func (m *Multiplexer) ThreadAccount(ctx context.Context, threadID string) (AccountSnapshot, error) {
 	accountID, ok := m.store.ThreadOwner(threadID)
 	if !ok {

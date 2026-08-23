@@ -14,6 +14,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Persistent Automatic/manual subscription selection for new chats.
 - Compact per-account next-weekly-reset dates with visible 24-hour local times
   in the profile menu.
+- Confirmed removal of secondary subscription profiles and their isolated login
+  data, with safeguards for Primary and subscriptions that still own tasks.
 
 ## [0.1.0] - 2026-08-15
 

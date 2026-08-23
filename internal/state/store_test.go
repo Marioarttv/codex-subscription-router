@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,5 +218,76 @@ func TestRoutingAccountPreferenceRejectsUnknownAccount(t *testing.T) {
 	}
 	if err := store.SetRoutingAccountID("missing"); err == nil {
 		t.Fatal("expected an unknown routing account to be rejected")
+	}
+}
+
+func TestRemoveAccountDeletesIsolatedDataAndClearsRoutingPreference(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Duplicate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialPath := filepath.Join(secondary.CodexHome, "auth.json")
+	if err := os.WriteFile(credentialPath, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.RemoveAccount(secondary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.ID != secondary.ID {
+		t.Fatalf("removed account = %#v, want %q", removed, secondary.ID)
+	}
+	if _, ok := store.Account(secondary.ID); ok {
+		t.Fatal("removed account remains in the store")
+	}
+	if store.RoutingAccountID() != "" {
+		t.Fatalf("routing preference was not reset: %q", store.RoutingAccountID())
+	}
+	if _, err := os.Stat(filepath.Dir(secondary.CodexHome)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("isolated account data still exists: %v", err)
+	}
+
+	reopened, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reopened.Account(secondary.ID); ok {
+		t.Fatal("removed account reappeared after reopening the store")
+	}
+}
+
+func TestRemoveAccountProtectsPrimaryAndAssignedTasks(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RemoveAccount("primary"); err == nil {
+		t.Fatal("expected Primary removal to be rejected")
+	}
+	secondary, err := store.AddAccount("In use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadOwner("thread-1", secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RemoveAccount(secondary.ID); err == nil {
+		t.Fatal("expected removal of an account with assigned tasks to be rejected")
+	}
+	if _, ok := store.Account(secondary.ID); !ok {
+		t.Fatal("rejected account removal changed the store")
+	}
+	if _, err := os.Stat(secondary.CodexHome); err != nil {
+		t.Fatalf("rejected account removal deleted its data: %v", err)
 	}
 }

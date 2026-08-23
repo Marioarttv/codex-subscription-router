@@ -234,6 +234,14 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 	ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
 	defer cancel()
 
+	if len(parts) == 1 && request.Method == http.MethodDelete {
+		if err := s.mux.RemoveAccount(ctx, accountID); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	if len(parts) == 1 && request.Method == http.MethodPatch {
 		var input struct {
 			Label   *string `json:"label"`

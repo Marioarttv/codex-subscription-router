@@ -10,14 +10,27 @@ function CodexMuxProfileMenuOpenChange(setOpen) {
 }
 
 async function codexMuxRequest(path, options = {}) {
-  const response = await fetch(`${CODEX_MUX_API}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Codex-Mux-Token": CODEX_MUX_TOKEN,
-      ...options.headers,
-    },
-  });
+  const method = String(options.method || "GET").toUpperCase();
+  const attempts = method === "GET" ? 4 : 1;
+  let response;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      response = await fetch(`${CODEX_MUX_API}${path}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Codex-Mux-Token": CODEX_MUX_TOKEN,
+          ...options.headers,
+        },
+      });
+      break;
+    } catch (requestError) {
+      if (attempt + 1 === attempts) throw requestError;
+      await new Promise((resolve) =>
+        setTimeout(resolve, [250, 750, 1_500][attempt]),
+      );
+    }
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
@@ -29,6 +42,11 @@ const CODEX_MUX_ACCOUNT_SCOPED_PLUGIN_METHODS = new Set([
   "read-apps",
   "list-mcp-server-status",
   "login-mcp-server",
+  "app/list",
+  "app/installed",
+  "app/read",
+  "mcpServerStatus/list",
+  "mcpServer/oauth/login",
 ]);
 
 function codexMuxScopePluginRequest(method, params) {
@@ -235,6 +253,7 @@ function CodexMuxAccountMenu() {
   const [login, setLogin] = kXc.useState(null);
   const [codeCopied, setCodeCopied] = kXc.useState(false);
   const [routingAccountId, setRoutingAccountId] = kXc.useState("");
+  const [removeAccountId, setRemoveAccountId] = kXc.useState("");
   const loginAccountId = login?.accountId || null;
 
   const refresh = kXc.useCallback(async () => {
@@ -271,6 +290,7 @@ function CodexMuxAccountMenu() {
         }
         if (
           payload.type === "account-updated" ||
+          payload.type === "account-removed" ||
           payload.type === "routing-updated"
         ) {
           refresh();
@@ -354,6 +374,31 @@ function CodexMuxAccountMenu() {
         body: JSON.stringify({ accountId }),
       });
       setRoutingAccountId(result.accountId || "");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function beginRemoveAccount(event, accountId) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) return;
+    setRemoveAccountId((current) => current === accountId ? "" : accountId);
+  }
+
+  async function removeAccount(event, account) {
+    event.preventDefault();
+    if (busy || account.controller) return;
+    setBusy(true);
+    setError("");
+    try {
+      await codexMuxRequest(`/accounts/${encodeURIComponent(account.id)}`, {
+        method: "DELETE",
+      });
+      setRemoveAccountId("");
+      await refresh();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -492,6 +537,23 @@ function CodexMuxAccountMenu() {
                   }),
                 ],
               }),
+              account.controller
+                ? null
+                : (0, e7.jsx)("button", {
+                    type: "button",
+                    className: [
+                      "ml-1 flex size-7 shrink-0 items-center justify-center rounded-md",
+                      "text-token-text-tertiary transition-colors",
+                      "hover:bg-token-foreground/10 hover:text-red-500",
+                    ].join(" "),
+                    title: `Remove ${account.label}`,
+                    "aria-label": `Remove ${account.label}`,
+                    disabled: busy,
+                    onClick: (event) => beginRemoveAccount(event, account.id),
+                    children: (0, e7.jsx)(CodexMuxTrashIcon, {
+                      className: "size-4",
+                    }),
+                  }),
             ],
           }),
           onSelect: (event) => selectRoutingAccount(event, account.id),
@@ -502,6 +564,25 @@ function CodexMuxAccountMenu() {
         `codex-mux-account-${account.id}`,
       ),
     );
+    if (removeAccountId === account.id) {
+      rows.push(
+        (0, e7.jsx)(
+          _H,
+          {
+            LeftIcon: CodexMuxTrashIcon,
+            SubText: "Deletes login data",
+            tone: "danger",
+            rightIcon: (0, e7.jsx)("span", {
+              className: "font-medium text-red-500",
+              children: busy ? "Deleting…" : "Delete",
+            }),
+            onSelect: (event) => removeAccount(event, account),
+            children: `Remove ${account.label}?`,
+          },
+          `codex-mux-remove-confirm-${account.id}`,
+        ),
+      );
+    }
   }
 
   if (login) {
@@ -625,6 +706,32 @@ function CodexMuxPlusIcon(props) {
       stroke: "currentColor",
       strokeWidth: 1.5,
       strokeLinecap: "round",
+    }),
+  });
+}
+
+function CodexMuxTrashIcon(props) {
+  return (0, e7.jsx)("svg", {
+    viewBox: "0 0 20 20",
+    fill: "none",
+    "aria-hidden": true,
+    ...props,
+    children: (0, e7.jsxs)(e7.Fragment, {
+      children: [
+        (0, e7.jsx)("path", {
+          d: "M4.75 6.25h10.5M8 3.75h4M6.25 6.25l.6 9h6.3l.6-9",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+        }),
+        (0, e7.jsx)("path", {
+          d: "M8.5 8.75v4M11.5 8.75v4",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+        }),
+      ],
     }),
   });
 }

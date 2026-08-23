@@ -254,6 +254,82 @@ func (s *Store) UpdateAccount(id string, label *string, enabled *bool) (Account,
 	return Account{}, fmt.Errorf("account %q not found", id)
 }
 
+// RemoveAccount permanently removes a non-controller account and its isolated
+// Codex home. Accounts that still own threads must be retained so those threads
+// do not become inaccessible.
+func (s *Store) RemoveAccount(id string) (Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id = strings.TrimSpace(id)
+	index := -1
+	var account Account
+	for candidateIndex, candidate := range s.accounts {
+		if candidate.ID == id {
+			index = candidateIndex
+			account = candidate
+			break
+		}
+	}
+	if index == -1 {
+		return Account{}, fmt.Errorf("account %q not found", id)
+	}
+	if account.Controller {
+		return Account{}, errors.New("the Primary account cannot be removed")
+	}
+	threadCount := 0
+	for _, ownerID := range s.owners {
+		if ownerID == account.ID {
+			threadCount++
+		}
+	}
+	if threadCount != 0 {
+		return Account{}, fmt.Errorf(
+			"%s cannot be removed because it owns %d task(s)",
+			account.Label,
+			threadCount,
+		)
+	}
+
+	expectedHome := filepath.Join(s.root, "accounts", account.ID, "codex-home")
+	if !samePath(account.CodexHome, expectedHome) {
+		return Account{}, errors.New("refusing to remove an account with an unexpected Codex home")
+	}
+	accountRoot := filepath.Dir(account.CodexHome)
+	stagingID, err := randomID()
+	if err != nil {
+		return Account{}, fmt.Errorf("prepare account removal: %w", err)
+	}
+	stagingRoot := filepath.Join(s.root, ".removing-"+stagingID)
+	homeStaged := false
+	if err := os.Rename(accountRoot, stagingRoot); err == nil {
+		homeStaged = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Account{}, fmt.Errorf("stage isolated account data for removal: %w", err)
+	}
+
+	previousAccounts := s.accounts
+	previousRoutingAccountID := s.routingAccountID
+	s.accounts = append(slices.Clone(s.accounts[:index]), s.accounts[index+1:]...)
+	if s.routingAccountID == account.ID {
+		s.routingAccountID = ""
+	}
+	if err := s.saveLocked(); err != nil {
+		s.accounts = previousAccounts
+		s.routingAccountID = previousRoutingAccountID
+		if homeStaged {
+			_ = os.Rename(stagingRoot, accountRoot)
+		}
+		return Account{}, err
+	}
+	if homeStaged {
+		if err := os.RemoveAll(stagingRoot); err != nil {
+			return account, fmt.Errorf("remove isolated account data: %w", err)
+		}
+	}
+	return account, nil
+}
+
 func (s *Store) ThreadOwner(threadID string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

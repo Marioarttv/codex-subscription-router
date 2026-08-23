@@ -210,7 +210,10 @@ available subscription.
 Each subscription row shows its remaining weekly allowance beside a compact
 `DD/MM` reset date, with the local reset time directly beneath it in 24-hour
 format. The subscription assigned to the current thread appears in its pinned
-summary.
+summary. Secondary rows also include a remove button. Removal requires a
+second confirmation, permanently deletes that slot's isolated login data, and
+is refused while tasks are still assigned to the subscription. The Primary
+account cannot be removed.
 
 ## Profiles, plugins, and resets
 
