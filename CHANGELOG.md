@@ -11,6 +11,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   rebuilds, recoverable upgrades, and automatic launch.
 - Reset-aware routing that prioritizes weekly quota at risk of expiring and
   gives a bounded boost to subscriptions with banked usage resets.
+- Persistent Automatic/manual subscription selection for new chats.
+- Per-account next-weekly-reset timestamps in the profile menu.
 
 ## [0.1.0] - 2026-08-15
 

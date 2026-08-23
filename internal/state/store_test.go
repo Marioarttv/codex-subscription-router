@@ -172,3 +172,50 @@ func TestUpdateAccountPreservesController(t *testing.T) {
 		t.Fatalf("unexpected updated account: %#v", account)
 	}
 }
+
+func TestRoutingAccountPreferencePersistsWithoutChangingThreadOwners(t *testing.T) {
+	root := t.TempDir()
+	primaryHome := filepath.Join(root, "primary")
+	store, err := Open(filepath.Join(root, "mux"), primaryHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadOwner("existing-thread", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(filepath.Join(root, "mux"), primaryHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.RoutingAccountID(); got != secondary.ID {
+		t.Fatalf("routing account = %q, want %q", got, secondary.ID)
+	}
+	if owner, ok := reopened.ThreadOwner("existing-thread"); !ok || owner != "primary" {
+		t.Fatalf("existing thread owner changed: owner=%q ok=%v", owner, ok)
+	}
+	if err := reopened.SetRoutingAccountID(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.RoutingAccountID(); got != "" {
+		t.Fatalf("automatic routing was not restored: %q", got)
+	}
+}
+
+func TestRoutingAccountPreferenceRejectsUnknownAccount(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root, filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID("missing"); err == nil {
+		t.Fatal("expected an unknown routing account to be rejected")
+	}
+}

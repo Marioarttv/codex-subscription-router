@@ -52,6 +52,7 @@ type AccountSnapshot struct {
 }
 
 type RouteReason struct {
+	RoutingMode          string   `json:"routingMode,omitempty"`
 	WeeklyUsedPercent    *float64 `json:"weeklyUsedPercent"`
 	WeeklyResetsAt       *int64   `json:"weeklyResetsAt,omitempty"`
 	ShortUsedPercent     *float64 `json:"shortUsedPercent"`
@@ -63,6 +64,29 @@ type RouteReason struct {
 
 func (m *Multiplexer) Accounts(ctx context.Context) []AccountSnapshot {
 	return m.accountSnapshots(ctx, true)
+}
+
+func (m *Multiplexer) RoutingAccountID() string {
+	return m.store.RoutingAccountID()
+}
+
+func (m *Multiplexer) SetRoutingAccountID(id string) error {
+	if err := m.store.SetRoutingAccountID(id); err != nil {
+		return err
+	}
+	message := "Automatic routing enabled"
+	accountID := m.store.RoutingAccountID()
+	if accountID != "" {
+		if account, ok := m.store.Account(accountID); ok {
+			message = fmt.Sprintf("New chats will use %s", account.Label)
+		}
+	}
+	m.publish(Event{
+		Type:      "routing-updated",
+		AccountID: accountID,
+		Message:   message,
+	})
+	return nil
 }
 
 func (m *Multiplexer) accountSnapshots(ctx context.Context, includeProfile bool) []AccountSnapshot {
@@ -240,6 +264,9 @@ func (m *Multiplexer) chooseAccount(ctx context.Context) (state.Account, RouteRe
 
 func (m *Multiplexer) chooseAccountExcluding(ctx context.Context, excluded map[string]struct{}) (state.Account, RouteReason, error) {
 	snapshots := m.accountSnapshots(ctx, false)
+	if account, reason, ok := m.preferredAccount(snapshots, excluded); ok {
+		return account, reason, nil
+	}
 	type candidate struct {
 		account      state.Account
 		reason       RouteReason
@@ -267,7 +294,7 @@ func (m *Multiplexer) chooseAccountExcluding(ctx context.Context, excluded map[s
 		}
 		weeklyUsed := 1_000.0
 		shortUsed := 1_000.0
-		reason := RouteReason{ThreadCount: snapshot.ThreadCount}
+		reason := RouteReason{RoutingMode: "auto", ThreadCount: snapshot.ThreadCount}
 		if weekly != nil {
 			weeklyUsed = weekly.UsedPercent
 			reason.WeeklyUsedPercent = &weekly.UsedPercent
@@ -345,6 +372,44 @@ collectResetCredits:
 		return left.account.CreatedAt < right.account.CreatedAt
 	})
 	return candidates[0].account, candidates[0].reason, nil
+}
+
+func (m *Multiplexer) preferredAccount(snapshots []AccountSnapshot, excluded map[string]struct{}) (state.Account, RouteReason, bool) {
+	preferredID := m.store.RoutingAccountID()
+	if preferredID == "" {
+		return state.Account{}, RouteReason{}, false
+	}
+	if _, skip := excluded[preferredID]; skip {
+		return state.Account{}, RouteReason{}, false
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.ID != preferredID || !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" {
+			continue
+		}
+		weekly, short := longestAndShortestWindow(snapshot.RateLimits)
+		if weekly != nil && weekly.UsedPercent >= 100 {
+			return state.Account{}, RouteReason{}, false
+		}
+		account, ok := m.store.Account(preferredID)
+		if !ok {
+			return state.Account{}, RouteReason{}, false
+		}
+		reason := RouteReason{RoutingMode: "manual", ThreadCount: snapshot.ThreadCount}
+		if weekly != nil {
+			used := weekly.UsedPercent
+			reason.WeeklyUsedPercent = &used
+			if weekly.ResetsAt != nil {
+				reset := *weekly.ResetsAt
+				reason.WeeklyResetsAt = &reset
+			}
+		}
+		if short != nil {
+			used := short.UsedPercent
+			reason.ShortUsedPercent = &used
+		}
+		return account, reason, true
+	}
+	return state.Account{}, RouteReason{}, false
 }
 
 func routeUrgencyScore(now time.Time, weekly *RateLimitWindow, credits resetCreditMetadata) float64 {

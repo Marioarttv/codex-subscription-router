@@ -26,9 +26,10 @@ type Account struct {
 }
 
 type persistedState struct {
-	Version     int               `json:"version"`
-	Accounts    []Account         `json:"accounts"`
-	ThreadOwner map[string]string `json:"threadOwner"`
+	Version          int               `json:"version"`
+	Accounts         []Account         `json:"accounts"`
+	RoutingAccountID string            `json:"routingAccountId,omitempty"`
+	ThreadOwner      map[string]string `json:"threadOwner"`
 }
 
 // Store persists only routing metadata. OAuth credentials and conversation
@@ -39,6 +40,7 @@ type Store struct {
 	path             string
 	primaryCodexHome string
 	accounts         []Account
+	routingAccountID string
 	owners           map[string]string
 }
 
@@ -70,6 +72,7 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 			return nil, fmt.Errorf("unsupported state version %d", persisted.Version)
 		}
 		store.accounts = persisted.Accounts
+		store.routingAccountID = persisted.RoutingAccountID
 		if persisted.ThreadOwner != nil {
 			store.owners = persisted.ThreadOwner
 		}
@@ -139,6 +142,40 @@ func (s *Store) Account(id string) (Account, bool) {
 		}
 	}
 	return Account{}, false
+}
+
+// RoutingAccountID returns the account selected for new threads. An empty
+// value enables quota-aware automatic routing.
+func (s *Store) RoutingAccountID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.routingAccountID
+}
+
+// SetRoutingAccountID selects an account for new threads. Passing an empty ID
+// restores quota-aware automatic routing. Existing thread ownership is never
+// changed by this preference.
+func (s *Store) SetRoutingAccountID(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id = strings.TrimSpace(id)
+	if id != "" {
+		found := false
+		for _, account := range s.accounts {
+			if account.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("account %q not found", id)
+		}
+	}
+	if s.routingAccountID == id {
+		return nil
+	}
+	s.routingAccountID = id
+	return s.saveLocked()
 }
 
 func (s *Store) Controller() (Account, bool) {
@@ -249,9 +286,10 @@ func (s *Store) ThreadCounts() map[string]int {
 
 func (s *Store) saveLocked() error {
 	persisted := persistedState{
-		Version:     stateVersion,
-		Accounts:    s.accounts,
-		ThreadOwner: s.owners,
+		Version:          stateVersion,
+		Accounts:         s.accounts,
+		RoutingAccountID: s.routingAccountID,
+		ThreadOwner:      s.owners,
 	}
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {

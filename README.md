@@ -24,6 +24,8 @@ binaries or a prebuilt application.
 
 - **Quota-aware routing.** New chats favour weekly allowance that will expire
   sooner, with a bounded boost for accounts holding banked usage resets.
+- **Manual account selection.** Choose Automatic routing or pin new chats to a
+  specific connected subscription directly from the profile menu.
 - **Sticky conversations.** Once a thread is assigned, every follow-up returns
   to the same subscription unless that subscription is depleted.
 - **Automatic failover.** A depleted thread continues through another account
@@ -193,12 +195,21 @@ starts another sign-in.
 | Situation | Behaviour |
 | --- | --- |
 | New chat | Assigned by quota-at-risk, banked resets, and short-window pressure |
+| Manual account selected | New chats use that subscription while it has capacity |
 | Follow-up | Sent to the thread's persisted account owner |
 | Owner depleted | Continued through another account with capacity |
 | Every account depleted | Combined quota alert with the next known reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
-The subscription assigned to the current thread appears in its pinned summary.
+Choose **Automatic routing** or a specific subscription from the profile menu.
+The selected mode persists across app restarts and applies to new chats only;
+existing threads remain on their persisted owner. If a manually selected
+subscription is depleted or unavailable, the router safely falls back to an
+available subscription.
+
+Each subscription row shows its remaining weekly allowance and the local date
+and time of its next weekly reset. The subscription assigned to the current
+thread appears in its pinned summary.
 
 ## Profiles, plugins, and resets
 

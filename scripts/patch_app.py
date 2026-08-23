@@ -125,6 +125,33 @@ def resolve_signing_identity(allow_adhoc: bool) -> str:
 def signing_team_identifier(identity: str) -> str | None:
     if identity == "-":
         return None
+    configured = os.environ.get("CODEX_MUX_SIGNING_TEAM_IDENTIFIER", "").strip()
+    if configured:
+        if re.fullmatch(r"[A-Z0-9]{10}", configured) is None:
+            raise RuntimeError(
+                "CODEX_MUX_SIGNING_TEAM_IDENTIFIER must contain 10 uppercase "
+                "ASCII letters or digits"
+            )
+        return configured
+    certificate = subprocess.run(
+        ["security", "find-certificate", "-c", identity, "-p"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if certificate.returncode == 0 and certificate.stdout:
+        subject = subprocess.run(
+            ["/usr/bin/openssl", "x509", "-noout", "-subject", "-nameopt", "RFC2253"],
+            check=False,
+            input=certificate.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+        )
+        if subject.returncode == 0:
+            match = re.search(rb"(?:^|,)OU=([A-Z0-9]{10})(?:,|$)", subject.stdout)
+            if match is not None:
+                return match.group(1).decode("ascii")
     match = re.search(r"\(([A-Z0-9]{10})\)$", identity)
     if match is None:
         raise RuntimeError(
@@ -416,6 +443,7 @@ def sign_native_code_tree(root: Path, identity: str) -> None:
 TEAM_SCOPED_ENTITLEMENTS = (
     "com.apple.application-identifier",
     "com.apple.developer.team-identifier",
+    "com.apple.developer.aps-environment",
     "com.apple.security.application-groups",
     "keychain-access-groups",
 )

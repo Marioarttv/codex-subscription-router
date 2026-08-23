@@ -1,8 +1,12 @@
 package mux
 
 import (
+	"bytes"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
 
 func TestPlanLabel(t *testing.T) {
@@ -148,5 +152,75 @@ func TestRouteUrgencyFallsBackToWeeklyUtilization(t *testing.T) {
 	}, resetCreditMetadata{})
 	if lessUsed <= moreUsed {
 		t.Fatalf("fallback should prefer the less-used account: less=%f more=%f", lessUsed, moreUsed)
+	}
+}
+
+func TestPreferredAccountSelectsManualRoutingTarget(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := New(Options{
+		RealExecutable: "/bin/false",
+		Store:          store,
+		Output:         &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	weeklyMinutes := int64(10_080)
+	reset := time.Now().Add(4 * 24 * time.Hour).Unix()
+	account, reason, ok := multiplexer.preferredAccount([]AccountSnapshot{
+		{ID: "primary", Enabled: true, Connected: true, AuthType: "chatgpt"},
+		{
+			ID: secondary.ID, Enabled: true, Connected: true, AuthType: "chatgpt",
+			RateLimits: &RateLimits{Primary: &RateLimitWindow{
+				UsedPercent: 35, WindowDurationMins: &weeklyMinutes, ResetsAt: &reset,
+			}},
+		},
+	}, nil)
+	if !ok || account.ID != secondary.ID {
+		t.Fatalf("manual target was not selected: account=%#v ok=%v", account, ok)
+	}
+	if reason.RoutingMode != "manual" || reason.WeeklyResetsAt == nil || *reason.WeeklyResetsAt != reset {
+		t.Fatalf("unexpected manual routing reason: %#v", reason)
+	}
+}
+
+func TestPreferredAccountFallsBackWhenSelectedAccountIsDepleted(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := New(Options{
+		RealExecutable: "/bin/false",
+		Store:          store,
+		Output:         &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, ok := multiplexer.preferredAccount([]AccountSnapshot{{
+		ID: secondary.ID, Enabled: true, Connected: true, AuthType: "chatgpt",
+		RateLimits: &RateLimits{Primary: &RateLimitWindow{UsedPercent: 100}},
+	}}, nil)
+	if ok {
+		t.Fatal("a depleted manual target should fall back to automatic routing")
 	}
 }

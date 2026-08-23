@@ -234,6 +234,7 @@ function CodexMuxAccountMenu() {
   const [error, setError] = kXc.useState("");
   const [login, setLogin] = kXc.useState(null);
   const [codeCopied, setCodeCopied] = kXc.useState(false);
+  const [routingAccountId, setRoutingAccountId] = kXc.useState("");
   const loginAccountId = login?.accountId || null;
 
   const refresh = kXc.useCallback(async () => {
@@ -244,6 +245,7 @@ function CodexMuxAccountMenu() {
         (account) => account.connected && account.enabled,
       );
       setAccounts(nextAccounts);
+      setRoutingAccountId(result.routingAccountId || "");
       setError("");
       if (nextAccounts.some((account) => account.connected)) setLoading(false);
     } catch (requestError) {
@@ -267,7 +269,12 @@ function CodexMuxAccountMenu() {
           codexMuxLoginActive = false;
           setLogin(null);
         }
-        if (payload.type === "account-updated") refresh();
+        if (
+          payload.type === "account-updated" ||
+          payload.type === "routing-updated"
+        ) {
+          refresh();
+        }
       } catch {}
     };
     const warmupTimer = setTimeout(refresh, 2_000);
@@ -336,6 +343,24 @@ function CodexMuxAccountMenu() {
     }
   }
 
+  async function selectRoutingAccount(event, accountId) {
+    event.preventDefault();
+    if (busy || accountId === routingAccountId) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await codexMuxRequest("/routing", {
+        method: "PATCH",
+        body: JSON.stringify({ accountId }),
+      });
+      setRoutingAccountId(result.accountId || "");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyCodeAndContinue(event) {
     event.preventDefault();
     const userCode = login?.userCode || "";
@@ -394,6 +419,27 @@ function CodexMuxAccountMenu() {
     rows.push(
       (0, e7.jsx)(CH.Separator, {}, "codex-mux-accounts-separator"),
     );
+    rows.push(
+      (0, e7.jsx)(
+        _H,
+        {
+          LeftIcon: CodexMuxAutoIcon,
+          SubText: "Choose each new task by quota and reset timing",
+          rightIcon: routingAccountId === ""
+            ? (0, e7.jsx)("span", {
+                className: "text-token-text-primary",
+                children: "Selected",
+              })
+            : null,
+          onSelect: (event) => selectRoutingAccount(event, ""),
+          children: "Automatic routing",
+        },
+        "codex-mux-routing-auto",
+      ),
+    );
+    rows.push(
+      (0, e7.jsx)(CH.Separator, {}, "codex-mux-routing-separator"),
+    );
   }
 
   for (const account of connected) {
@@ -409,14 +455,32 @@ function CodexMuxAccountMenu() {
               imageUrl: account.profileImageUrl,
               label: account.label,
             }),
-          SubText: account.email
-            ? (0, e7.jsx)(CodexMuxMaskedEmail, { email: account.email })
-            : account.planType || "ChatGPT subscription",
-          className: "group",
-          rightIcon: (0, e7.jsx)("span", {
-            className: "text-token-description-foreground tabular-nums",
-            children: remaining == null ? "–" : `${Math.round(remaining)}%`,
+          SubText: (0, e7.jsxs)("span", {
+            children: [
+              account.email
+                ? (0, e7.jsx)(CodexMuxMaskedEmail, { email: account.email })
+                : account.planType || "ChatGPT subscription",
+              (0, e7.jsx)("span", {
+                children: ` · ${codexMuxWeeklyResetLabel(account.rateLimits)}`,
+              }),
+            ],
           }),
+          className: "group",
+          rightIcon: (0, e7.jsxs)("span", {
+            className: "flex items-center gap-2 text-token-description-foreground tabular-nums",
+            children: [
+              routingAccountId === account.id
+                ? (0, e7.jsx)("span", {
+                    className: "text-token-text-primary",
+                    children: "Selected",
+                  })
+                : null,
+              (0, e7.jsx)("span", {
+                children: remaining == null ? "–" : `${Math.round(remaining)}%`,
+              }),
+            ],
+          }),
+          onSelect: (event) => selectRoutingAccount(event, account.id),
           children: account.planLabel
             ? `${account.label} · ${account.planLabel}`
             : account.label,
@@ -488,6 +552,21 @@ function codexMuxWeeklyWindow(rateLimits) {
   return windows.at(-1) || null;
 }
 
+function codexMuxWeeklyResetLabel(rateLimits) {
+  const resetSeconds = codexMuxWeeklyWindow(rateLimits)?.resetsAt;
+  if (resetSeconds == null) return "Weekly reset unavailable";
+  const reset = new Date(resetSeconds * 1_000);
+  if (Number.isNaN(reset.getTime())) return "Weekly reset unavailable";
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(reset);
+  return `Next weekly reset ${formatted}`;
+}
+
 function codexMuxUsageWindows(rateLimits) {
   return [rateLimits?.primary, rateLimits?.secondary]
     .filter(Boolean)
@@ -510,6 +589,33 @@ function CodexMuxPlusIcon(props) {
       stroke: "currentColor",
       strokeWidth: 1.5,
       strokeLinecap: "round",
+    }),
+  });
+}
+
+function CodexMuxAutoIcon(props) {
+  return (0, e7.jsx)("svg", {
+    viewBox: "0 0 20 20",
+    fill: "none",
+    "aria-hidden": true,
+    ...props,
+    children: (0, e7.jsxs)(e7.Fragment, {
+      children: [
+        (0, e7.jsx)("path", {
+          d: "M4 6.25h2.2c3.2 0 4.4 7.5 7.6 7.5H16m0 0-2-2m2 2-2 2",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+        }),
+        (0, e7.jsx)("path", {
+          d: "M4 13.75h2.2c1.2 0 2.1-1.05 2.9-2.4m1.8-2.7c.8-1.35 1.7-2.4 2.9-2.4H16m0 0-2-2m2 2-2 2",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+        }),
+      ],
     }),
   });
 }
