@@ -16,7 +16,7 @@ signature and reuse the same Apple team as the previous installed build.
 ## Accounts and routing
 
 - Connect at least two subscriptions and confirm photos, plans, masked emails,
-  pooled usage, compact `DD/MM` reset dates, exact-time hover tooltips, and
+  pooled usage, compact `DD/MM` reset dates, visible 24-hour reset times, and
   loading states.
 - Select each subscription from the profile menu, start a new chat, and confirm
   the chat is pinned to that subscription. Restore Automatic routing and verify

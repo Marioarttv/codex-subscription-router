@@ -479,12 +479,18 @@ function CodexMuxAccountMenu() {
                 "aria-hidden": true,
                 children: "·",
               }),
-              (0, e7.jsx)("span", {
-                className:
-                  "cursor-help underline decoration-dotted underline-offset-2",
-                title: weeklyReset.tooltip,
-                "aria-label": weeklyReset.tooltip,
-                children: weeklyReset.compact,
+              (0, e7.jsxs)("span", {
+                className: "flex flex-col items-end leading-none",
+                "aria-label": weeklyReset.label,
+                children: [
+                  (0, e7.jsx)("span", {
+                    children: weeklyReset.compact,
+                  }),
+                  (0, e7.jsx)("span", {
+                    className: "mt-1 text-[11px] text-token-text-tertiary",
+                    children: weeklyReset.time,
+                  }),
+                ],
               }),
             ],
           }),
@@ -565,18 +571,22 @@ function codexMuxWeeklyResetDisplay(rateLimits) {
   if (resetSeconds == null) {
     return {
       compact: "--/--",
-      tooltip: "Weekly reset unavailable",
+      time: "--:--",
+      label: "Weekly reset unavailable",
     };
   }
   const reset = new Date(resetSeconds * 1_000);
   if (Number.isNaN(reset.getTime())) {
     return {
       compact: "--/--",
-      tooltip: "Weekly reset unavailable",
+      time: "--:--",
+      label: "Weekly reset unavailable",
     };
   }
   const day = String(reset.getDate()).padStart(2, "0");
   const month = String(reset.getMonth() + 1).padStart(2, "0");
+  const hour = String(reset.getHours()).padStart(2, "0");
+  const minute = String(reset.getMinutes()).padStart(2, "0");
   const exact = new Intl.DateTimeFormat(undefined, {
     weekday: "long",
     month: "long",
@@ -588,7 +598,8 @@ function codexMuxWeeklyResetDisplay(rateLimits) {
   }).format(reset);
   return {
     compact: `${day}/${month}`,
-    tooltip: `Weekly reset: ${exact}`,
+    time: `${hour}:${minute}`,
+    label: `Weekly reset: ${exact}`,
   };
 }
 

@@ -208,8 +208,9 @@ subscription is depleted or unavailable, the router safely falls back to an
 available subscription.
 
 Each subscription row shows its remaining weekly allowance beside a compact
-`DD/MM` reset date. Hover the date to see the exact local reset date and time.
-The subscription assigned to the current thread appears in its pinned summary.
+`DD/MM` reset date, with the local reset time directly beneath it in 24-hour
+format. The subscription assigned to the current thread appears in its pinned
+summary.
 
 ## Profiles, plugins, and resets
 
