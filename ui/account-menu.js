@@ -344,7 +344,7 @@ function CodexMuxAccountMenu() {
     try {
       const created = await codexMuxRequest("/accounts", {
         method: "POST",
-        body: JSON.stringify({ label: `Subscription ${connected.length + 1}` }),
+        body: JSON.stringify({ label: "" }),
       });
       const result = await codexMuxRequest(`/accounts/${created.account.id}/login`, {
         method: "POST",

@@ -23,6 +23,9 @@ signature and reuse the same Apple team as the previous installed build.
   that the selection persists after an app restart.
 - Start chats until each account has received one; confirm every follow-up stays
   on its original account.
+- Open an existing chat's Subscription picker, move it to another account, and
+  confirm the same thread ID resumes there after an app restart. Verify the
+  picker includes emails when account labels are duplicated.
 - Spoof one depleted account and confirm the thread continues on an account with
   quota. Spoof all accounts depleted and confirm the combined alert.
 - Open a quota-triggered reset sheet, switch subscriptions, consume a reset, and

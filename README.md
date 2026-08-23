@@ -197,15 +197,18 @@ starts another sign-in.
 | New chat | Assigned by quota-at-risk, banked resets, and short-window pressure |
 | Manual account selected | New chats use that subscription while it has capacity |
 | Follow-up | Sent to the thread's persisted account owner |
+| Existing chat manually switched | History is copied atomically and resumed under the selected subscription |
 | Owner depleted | Continued through another account with capacity |
 | Every account depleted | Combined quota alert with the next known reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
 Choose **Automatic routing** or a specific subscription from the profile menu.
-The selected mode persists across app restarts and applies to new chats only;
-existing threads remain on their persisted owner. If a manually selected
-subscription is depleted or unavailable, the router safely falls back to an
-available subscription.
+The selected mode persists across app restarts and applies to new chats. For an
+existing chat, use the **Subscription** picker in its details panel. That picker
+shows each account's email and remaining quota, copies the current rollout into
+the target account without modifying the source, and keeps the same visible
+thread ID. If a manually selected new-chat subscription is depleted or
+unavailable, the router safely falls back to an available subscription.
 
 Each subscription row shows its remaining weekly allowance beside a compact
 `DD/MM` reset date, with the local reset time directly beneath it in 24-hour

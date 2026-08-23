@@ -120,23 +120,41 @@ func (s *Server) threadAccount(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
-	if request.Method != http.MethodGet {
+	switch request.Method {
+	case http.MethodGet:
+		threadID := strings.TrimSpace(request.URL.Query().Get("threadId"))
+		if threadID == "" {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": "threadId is required"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+		defer cancel()
+		account, err := s.mux.ThreadAccount(ctx, threadID)
+		if err != nil {
+			writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"account": account})
+	case http.MethodPatch:
+		var input struct {
+			ThreadID  string `json:"threadId"`
+			AccountID string `json:"accountId"`
+		}
+		if err := decodeJSON(request, &input); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		ctx, cancel := context.WithTimeout(request.Context(), 90*time.Second)
+		defer cancel()
+		account, err := s.mux.MoveThread(ctx, input.ThreadID, input.AccountID)
+		if err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"account": account})
+	default:
 		methodNotAllowed(response)
-		return
 	}
-	threadID := strings.TrimSpace(request.URL.Query().Get("threadId"))
-	if threadID == "" {
-		writeJSON(response, http.StatusBadRequest, map[string]any{"error": "threadId is required"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
-	defer cancel()
-	account, err := s.mux.ThreadAccount(ctx, threadID)
-	if err != nil {
-		writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"account": account})
 }
 
 func (s *Server) Serve(listener net.Listener) error {

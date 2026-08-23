@@ -198,7 +198,7 @@ func (s *Store) AddAccount(label string) (Account, error) {
 
 	label = strings.TrimSpace(label)
 	if label == "" {
-		label = fmt.Sprintf("Subscription %d", len(s.accounts)+1)
+		label = nextSubscriptionLabel(s.accounts)
 	}
 	id, err := randomID()
 	if err != nil {
@@ -227,6 +227,19 @@ func (s *Store) AddAccount(label string) (Account, error) {
 		return Account{}, err
 	}
 	return account, nil
+}
+
+func nextSubscriptionLabel(accounts []Account) string {
+	used := make(map[string]struct{}, len(accounts))
+	for _, account := range accounts {
+		used[strings.ToLower(strings.TrimSpace(account.Label))] = struct{}{}
+	}
+	for slot := 2; ; slot++ {
+		label := fmt.Sprintf("Subscription %d", slot)
+		if _, exists := used[strings.ToLower(label)]; !exists {
+			return label
+		}
+	}
 }
 
 func (s *Store) UpdateAccount(id string, label *string, enabled *bool) (Account, error) {

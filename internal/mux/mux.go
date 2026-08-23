@@ -70,6 +70,7 @@ type Multiplexer struct {
 	serverMu       sync.Mutex
 	serverRoutes   map[string]serverRequestRoute
 	serverSequence atomic.Uint64
+	handoffMu      sync.Mutex
 
 	outputMu sync.Mutex
 	eventsMu sync.RWMutex
@@ -345,12 +346,8 @@ func (m *Multiplexer) failoverTurn(
 		m.write(m.allSubscriptionsDepleted(ctx, message.ID))
 		return
 	}
-	if err := m.resumeThreadOnAccount(ctx, threadID, sourceAccountID, fallback.ID); err != nil {
+	if err := m.handoffThread(ctx, threadID, sourceAccountID, fallback.ID); err != nil {
 		m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", fallback.Label, err)))
-		return
-	}
-	if err := m.store.SetThreadOwner(threadID, fallback.ID); err != nil {
-		m.write(protocol.Failure(message.ID, -32028, err.Error()))
 		return
 	}
 	if err := m.forwardWithExclusions(fallback.ID, message, excluded); err != nil {
@@ -365,7 +362,21 @@ func (m *Multiplexer) failoverTurn(
 	})
 }
 
-func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+func (m *Multiplexer) handoffThread(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	m.handoffMu.Lock()
+	defer m.handoffMu.Unlock()
+
+	if currentOwner, ok := m.store.ThreadOwner(threadID); !ok || currentOwner != sourceAccountID {
+		return errors.New("chat subscription changed while preparing the handoff; try again")
+	}
+	sourceAccount, ok := m.store.Account(sourceAccountID)
+	if !ok {
+		return errors.New("source subscription is no longer configured")
+	}
+	targetAccount, ok := m.store.Account(targetAccountID)
+	if !ok || !targetAccount.Enabled {
+		return errors.New("target subscription is unavailable")
+	}
 	source, ok := m.child(sourceAccountID)
 	if !ok {
 		return fmt.Errorf("source subscription is unavailable")
@@ -374,7 +385,7 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if !ok {
 		return fmt.Errorf("target subscription is unavailable")
 	}
-	readParams, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": true})
+	readParams, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": false})
 	readResponse, err := source.Request(ctx, "thread/read", readParams)
 	if err != nil {
 		return fmt.Errorf("read existing chat: %w", err)
@@ -393,10 +404,25 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if readResult.Thread.ID == "" || readResult.Thread.Path == "" {
 		return errors.New("existing chat has no resumable history path")
 	}
+	targetPath, replacingExisting, err := prepareThreadRollout(
+		sourceAccount,
+		targetAccount,
+		threadID,
+		readResult.Thread.Path,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare chat history: %w", err)
+	}
+	if replacingExisting {
+		target, err = m.restartChild(ctx, targetAccount)
+		if err != nil {
+			return fmt.Errorf("restart target subscription for refreshed history: %w", err)
+		}
+	}
 	resumeParams, _ := json.Marshal(map[string]any{
 		"threadId":      threadID,
 		"history":       nil,
-		"path":          readResult.Thread.Path,
+		"path":          targetPath,
 		"cwd":           readResult.Thread.CWD,
 		"model":         nil,
 		"modelProvider": readResult.Thread.ModelProvider,
@@ -404,7 +430,24 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if _, err := target.Request(ctx, "thread/resume", resumeParams); err != nil {
 		return fmt.Errorf("resume existing chat: %w", err)
 	}
+	if err := m.store.SetThreadOwner(threadID, targetAccountID); err != nil {
+		return fmt.Errorf("save chat subscription: %w", err)
+	}
 	return nil
+}
+
+func (m *Multiplexer) restartChild(ctx context.Context, account state.Account) (*backend.Child, error) {
+	m.childrenMu.Lock()
+	child := m.children[account.ID]
+	delete(m.children, account.ID)
+	m.childrenMu.Unlock()
+	if child != nil {
+		_ = child.Close()
+		if err := child.WaitClosed(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return m.startChild(ctx, account)
 }
 
 func (m *Multiplexer) handleServerRequestResponse(message protocol.Message) {

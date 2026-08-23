@@ -45,6 +45,24 @@ func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	}
 }
 
+func TestAddAccountChoosesAnUnusedSubscriptionLabel(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddAccount("Subscription 3"); err != nil {
+		t.Fatal(err)
+	}
+	added, err := store.AddAccount("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.Label != "Subscription 2" {
+		t.Fatalf("label = %q, want Subscription 2", added.Label)
+	}
+}
+
 func TestAccountConfigInheritsManagedMCPAndPreservesLocalProjects(t *testing.T) {
 	root := t.TempDir()
 	primaryHome := filepath.Join(root, "primary")

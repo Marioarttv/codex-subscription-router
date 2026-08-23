@@ -16,6 +16,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   in the profile menu.
 - Confirmed removal of secondary subscription profiles and their isolated login
   data, with safeguards for Primary and subscriptions that still own tasks.
+- In-chat subscription picker and atomic cross-account history handoff for
+  existing chats, including paginated Codex rollouts and automatic failover.
 
 ## [0.1.0] - 2026-08-15
 
@@ -32,5 +34,5 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Loopback-only, token-authenticated diagnostic UI states.
 - Source-only CI, draft release automation, security documentation, and smoke tests.
 
-[Unreleased]: https://github.com/b-nnett/codex-subscription-router/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Marioarttv/codex-subscription-router/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/b-nnett/codex-subscription-router/releases/tag/v0.1.0

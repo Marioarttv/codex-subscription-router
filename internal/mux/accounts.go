@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/state"
@@ -188,6 +189,42 @@ func (m *Multiplexer) ThreadAccount(ctx context.Context, threadID string) (Accou
 		return AccountSnapshot{}, fmt.Errorf("thread %q has no subscription assignment", threadID)
 	}
 	return m.accountSnapshotWithProfile(ctx, accountID, true)
+}
+
+func (m *Multiplexer) MoveThread(ctx context.Context, threadID, targetAccountID string) (AccountSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	targetAccountID = strings.TrimSpace(targetAccountID)
+	if threadID == "" || targetAccountID == "" {
+		return AccountSnapshot{}, errors.New("thread and target subscription are required")
+	}
+	sourceAccountID, ok := m.store.ThreadOwner(threadID)
+	if !ok {
+		return AccountSnapshot{}, fmt.Errorf("thread %q has no subscription assignment", threadID)
+	}
+	if sourceAccountID == targetAccountID {
+		return m.accountSnapshotWithProfile(ctx, targetAccountID, true)
+	}
+	target, err := m.accountSnapshotWithProfile(ctx, targetAccountID, true)
+	if err != nil {
+		return AccountSnapshot{}, err
+	}
+	if !target.Enabled || !target.Connected {
+		return AccountSnapshot{}, fmt.Errorf("%s is not connected", target.Label)
+	}
+	if err := m.handoffThread(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
+		return AccountSnapshot{}, err
+	}
+	m.publish(Event{
+		Type:      "thread-moved",
+		AccountID: targetAccountID,
+		Message:   fmt.Sprintf("Chat moved to %s", target.Label),
+		Data: map[string]any{
+			"threadId":          threadID,
+			"previousAccountId": sourceAccountID,
+		},
+	})
+	target.ThreadCount = m.store.ThreadCounts()[targetAccountID]
+	return target, nil
 }
 
 func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.RawMessage, error) {

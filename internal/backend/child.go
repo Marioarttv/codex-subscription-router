@@ -143,6 +143,15 @@ func (c *Child) Close() error {
 	return c.command.Process.Signal(os.Interrupt)
 }
 
+func (c *Child) WaitClosed(ctx context.Context) error {
+	select {
+	case <-c.closed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *Child) readLoop(stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
