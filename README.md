@@ -207,9 +207,9 @@ existing threads remain on their persisted owner. If a manually selected
 subscription is depleted or unavailable, the router safely falls back to an
 available subscription.
 
-Each subscription row shows its remaining weekly allowance and the local date
-and time of its next weekly reset. The subscription assigned to the current
-thread appears in its pinned summary.
+Each subscription row shows its remaining weekly allowance beside a compact
+`DD/MM` reset date. Hover the date to see the exact local reset date and time.
+The subscription assigned to the current thread appears in its pinned summary.
 
 ## Profiles, plugins, and resets
 

@@ -444,6 +444,7 @@ function CodexMuxAccountMenu() {
 
   for (const account of connected) {
     const weekly = codexMuxWeeklyWindow(account.rateLimits);
+    const weeklyReset = codexMuxWeeklyResetDisplay(account.rateLimits);
     const remaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
     rows.push(
       (0, e7.jsx)(
@@ -455,28 +456,35 @@ function CodexMuxAccountMenu() {
               imageUrl: account.profileImageUrl,
               label: account.label,
             }),
-          SubText: (0, e7.jsxs)("span", {
-            children: [
-              account.email
-                ? (0, e7.jsx)(CodexMuxMaskedEmail, { email: account.email })
-                : account.planType || "ChatGPT subscription",
-              (0, e7.jsx)("span", {
-                children: ` · ${codexMuxWeeklyResetLabel(account.rateLimits)}`,
-              }),
-            ],
-          }),
+          SubText: account.email
+            ? (0, e7.jsx)(CodexMuxMaskedEmail, { email: account.email })
+            : account.planType || "ChatGPT subscription",
           className: "group",
           rightIcon: (0, e7.jsxs)("span", {
-            className: "flex items-center gap-2 text-token-description-foreground tabular-nums",
+            className:
+              "flex items-center gap-1 whitespace-nowrap text-token-description-foreground tabular-nums",
             children: [
               routingAccountId === account.id
                 ? (0, e7.jsx)("span", {
                     className: "text-token-text-primary",
-                    children: "Selected",
+                    title: "Selected subscription",
+                    "aria-label": "Selected subscription",
+                    children: "✓",
                   })
                 : null,
               (0, e7.jsx)("span", {
                 children: remaining == null ? "–" : `${Math.round(remaining)}%`,
+              }),
+              (0, e7.jsx)("span", {
+                "aria-hidden": true,
+                children: "·",
+              }),
+              (0, e7.jsx)("span", {
+                className:
+                  "cursor-help underline decoration-dotted underline-offset-2",
+                title: weeklyReset.tooltip,
+                "aria-label": weeklyReset.tooltip,
+                children: weeklyReset.compact,
               }),
             ],
           }),
@@ -552,19 +560,36 @@ function codexMuxWeeklyWindow(rateLimits) {
   return windows.at(-1) || null;
 }
 
-function codexMuxWeeklyResetLabel(rateLimits) {
+function codexMuxWeeklyResetDisplay(rateLimits) {
   const resetSeconds = codexMuxWeeklyWindow(rateLimits)?.resetsAt;
-  if (resetSeconds == null) return "Weekly reset unavailable";
+  if (resetSeconds == null) {
+    return {
+      compact: "--/--",
+      tooltip: "Weekly reset unavailable",
+    };
+  }
   const reset = new Date(resetSeconds * 1_000);
-  if (Number.isNaN(reset.getTime())) return "Weekly reset unavailable";
-  const formatted = new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    month: "short",
+  if (Number.isNaN(reset.getTime())) {
+    return {
+      compact: "--/--",
+      tooltip: "Weekly reset unavailable",
+    };
+  }
+  const day = String(reset.getDate()).padStart(2, "0");
+  const month = String(reset.getMonth() + 1).padStart(2, "0");
+  const exact = new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
     day: "numeric",
+    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   }).format(reset);
-  return `Next weekly reset ${formatted}`;
+  return {
+    compact: `${day}/${month}`,
+    tooltip: `Weekly reset: ${exact}`,
+  };
 }
 
 function codexMuxUsageWindows(rateLimits) {
