@@ -23,6 +23,7 @@ function CodexMuxThreadSubscription() {
   const [accounts, setAccounts] = TE.useState([]);
   const [busy, setBusy] = TE.useState(false);
   const [error, setError] = TE.useState("");
+  const [notice, setNotice] = TE.useState("");
 
   TE.useEffect(() => {
     let active = true;
@@ -66,6 +67,14 @@ function CodexMuxThreadSubscription() {
         ) {
           refresh();
         }
+        if (
+          (payload.type === "thread-failed-over" ||
+            payload.type === "thread-failover-failed" ||
+            payload.type === "thread-failover-unavailable") &&
+          payload.data?.threadId === threadId
+        ) {
+          setNotice(payload.message || "");
+        }
       } catch {}
     };
     const warmupTimer = setTimeout(refresh, 2_000);
@@ -89,6 +98,7 @@ function CodexMuxThreadSubscription() {
         body: JSON.stringify({ threadId, accountId }),
       });
       setAccount(result.account || null);
+      setNotice("");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -97,9 +107,7 @@ function CodexMuxThreadSubscription() {
   }
 
   if (!account) return null;
-  const weekly = codexMuxThreadWeeklyWindow(account.rateLimits);
-  const remaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
-  const depleted = remaining === 0;
+  const usage = codexMuxThreadUsage(account.rateLimits);
   const AccountAvatar = globalThis.CodexMuxAccountAvatar;
   return (0, zE.jsx)(K.Section, {
     sectionKey: "codex-mux-subscription",
@@ -128,49 +136,48 @@ function CodexMuxThreadSubscription() {
               children: accounts
                 .filter((candidate) => candidate.enabled && candidate.connected)
                 .map((candidate) => {
-                  const candidateWeekly = codexMuxThreadWeeklyWindow(
-                    candidate.rateLimits,
-                  );
-                  const candidateRemaining =
-                    candidateWeekly == null
-                      ? null
-                      : Math.max(0, 100 - candidateWeekly.usedPercent);
+                  const candidateUsage = codexMuxThreadUsage(candidate.rateLimits);
                   const identity = candidate.email
                     ? `${candidate.label} · ${candidate.email}`
                     : candidate.label;
-                  const usage =
-                    candidateRemaining == null
-                      ? "usage unavailable"
-                      : candidateRemaining === 0
-                        ? "depleted"
-                        : `${Math.round(candidateRemaining)}% left`;
                   return (0, zE.jsx)(
                     "option",
                     {
                       value: candidate.id,
-                      disabled: candidateRemaining === 0,
-                      children: `${identity} · ${usage}`,
+                      disabled: !candidateUsage.hasCapacity,
+                      children: `${identity} · ${candidateUsage.summary}`,
                     },
                     candidate.id,
                   );
                 }),
             }),
-            (0, zE.jsx)("span", {
-              className: "shrink-0 tabular-nums text-token-description-foreground",
-              children: busy
-                ? "Moving…"
-                : remaining == null
-                  ? "Usage unavailable"
-                  : depleted
-                    ? "Depleted"
-                    : `${Math.round(remaining)}% remaining`,
-            }),
+            busy
+              ? (0, zE.jsx)("span", {
+                  className: "shrink-0 tabular-nums text-token-description-foreground",
+                  children: "Moving…",
+                })
+              : (0, zE.jsxs)("span", {
+                  className: "flex shrink-0 flex-col items-end text-xs tabular-nums text-token-description-foreground",
+                  children: [
+                    (0, zE.jsx)("span", { children: `5h ${usage.shortText}` }),
+                    (0, zE.jsx)("span", {
+                      className: "text-token-text-tertiary",
+                      children: `Week ${usage.weeklyText}`,
+                    }),
+                  ],
+                }),
           ],
         }),
         error
           ? (0, zE.jsx)("span", {
               className: "text-xs text-red-500",
               children: error,
+            })
+          : null,
+        notice
+          ? (0, zE.jsx)("span", {
+              className: "text-xs text-token-text-secondary",
+              children: notice,
             })
           : null,
       ],
@@ -185,4 +192,37 @@ function codexMuxThreadWeeklyWindow(rateLimits) {
       (left.windowDurationMins || 0) - (right.windowDurationMins || 0),
   );
   return windows.at(-1) || null;
+}
+
+function codexMuxThreadShortWindow(rateLimits) {
+  const windows = [rateLimits?.primary, rateLimits?.secondary].filter(Boolean);
+  windows.sort(
+    (left, right) =>
+      (left.windowDurationMins || 0) - (right.windowDurationMins || 0),
+  );
+  if (windows.length === 0) return null;
+  if (windows.length === 1 && (windows[0].windowDurationMins || 0) > 1_440) {
+    return null;
+  }
+  return windows[0];
+}
+
+function codexMuxThreadUsage(rateLimits) {
+  const short = codexMuxThreadShortWindow(rateLimits);
+  const weekly = codexMuxThreadWeeklyWindow(rateLimits);
+  const shortRemaining = short == null ? null : Math.max(0, 100 - short.usedPercent);
+  const weeklyRemaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
+  const reached = rateLimits?.rateLimitReachedType != null;
+  const hasCapacity =
+    !reached && shortRemaining !== 0 && weeklyRemaining !== 0;
+  const shortText = shortRemaining == null ? "–" : `${Math.round(shortRemaining)}%`;
+  const weeklyText = weeklyRemaining == null ? "–" : `${Math.round(weeklyRemaining)}%`;
+  return {
+    hasCapacity,
+    shortText,
+    weeklyText,
+    summary: reached || !hasCapacity
+      ? `depleted · 5h ${shortText} · week ${weeklyText}`
+      : `5h ${shortText} · week ${weeklyText}`,
+  };
 }

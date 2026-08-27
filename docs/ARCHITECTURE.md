@@ -18,22 +18,29 @@ The multiplexer starts one real app-server child for every enabled account,
 each with its own `CODEX_HOME` and `CODEX_SQLITE_HOME`.
 
 New threads use the manually selected account when that subscription is
-connected and has capacity. With Automatic routing selected, they are assigned
-using a quota-urgency score: weekly percentage remaining divided by the hours
-until that account resets. Banked usage resets add a capped bonus, while
-short-window usage, existing pinned-thread count, and stable account order
-break close results. Reset-credit metadata is fetched in parallel, cached for
-five minutes, and treated as neutral when unavailable. A depleted or
-unavailable manual target falls back to the automatic selection path.
+connected and both its five-hour and weekly windows have capacity. With
+Automatic routing selected, accounts depleted in either window are excluded;
+the remainder are assigned using a quota-urgency score: weekly percentage
+remaining divided by the hours until that account resets. Banked usage resets
+add a capped bonus, while five-hour usage, existing pinned-thread count, and
+stable account order break close results. Reset-credit metadata is fetched in
+parallel, cached for five minutes, and treated as neutral when unavailable. A
+depleted or unavailable manual target falls back to automatic selection.
 
 The manual routing preference is stored in `state.json` and controls only new
 threads. Once a thread ID is known, `state.json` persists its owner. Requests,
 responses, approvals, and notifications are rewritten only as needed to
 preserve one coherent desktop session.
 
-If the owner is depleted, the multiplexer resumes the rollout on an account
-with capacity and updates ownership. Threads do not migrate for ordinary load
-balancing.
+If the owner is depleted before a turn starts, the multiplexer resumes the
+rollout on an account with capacity and updates ownership. It also tracks each
+accepted turn until `turn/completed`. A terminal `failed` turn whose structured
+`codexErrorInfo` is `usageLimitExceeded` is forwarded unchanged, then its
+completed rollout is copied to the next account and a new text-only
+`Continue.` turn starts. Original attachments, selected context, client message
+IDs, and response metadata are not replayed. The tracked turn is consumed
+atomically, so duplicate completion notifications cannot trigger duplicate
+continuations. Threads do not migrate for ordinary load balancing.
 
 ## Account isolation
 

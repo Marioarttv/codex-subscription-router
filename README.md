@@ -22,14 +22,16 @@ binaries or a prebuilt application.
 
 ## Highlights
 
-- **Quota-aware routing.** New chats favour weekly allowance that will expire
-  sooner, with a bounded boost for accounts holding banked usage resets.
+- **Two-window quota routing.** Five-hour capacity is enforced for every turn;
+  new chats then favour weekly allowance that will expire sooner, with a
+  bounded boost for accounts holding banked usage resets.
 - **Manual account selection.** Choose Automatic routing or pin new chats to a
   specific connected subscription directly from the profile menu.
 - **Sticky conversations.** Once a thread is assigned, every follow-up returns
   to the same subscription unless that subscription is depleted.
-- **Automatic failover.** A depleted thread continues through another account
-  with quota; if the whole pool is empty, the app shows one combined alert.
+- **Automatic continuation.** A turn that ends on a structured usage-limit
+  failure moves to another account and sends `Continue.` once; if the whole
+  pool is empty, the app preserves the failure and shows the next known reset.
 - **Native account management.** The existing profile menu shows pooled usage,
   profile photos, plan names, masked emails, and device-code sign-in.
 - **Account-aware settings.** Profile statistics can be viewed together or per
@@ -60,10 +62,11 @@ Codex Subscription Router.app
              └── thread ID → persistent account owner
 ```
 
-New-thread routing compares the quota burn rate needed before each weekly reset,
-then applies a capped banked-reset boost. Short-window usage, pinned-thread
-count, and stable account order break close results. Existing threads do not
-migrate merely for load balancing.
+New-thread routing first excludes accounts whose five-hour or weekly window is
+depleted. It then compares the quota burn rate needed before each weekly reset
+and applies a capped banked-reset boost. Five-hour usage, pinned-thread count,
+and stable account order break close results. Existing threads do not migrate
+merely for load balancing.
 
 Read [the architecture](docs/ARCHITECTURE.md) for the request flow and
 [the security model](docs/SECURITY-MODEL.md) for trust boundaries.
@@ -75,8 +78,8 @@ Codex Subscription Router currently targets:
 | Component | Supported value |
 | --- | --- |
 | Platform | macOS on Apple silicon |
-| Official ChatGPT version | `26.803.61601` |
-| Official bundle build | `6396` |
+| Official ChatGPT version | `26.820.60940` |
+| Official bundle build | `7119` |
 | Go | 1.26 or newer |
 | Node.js | 22.12 or newer |
 
@@ -186,20 +189,21 @@ request Automation access the first time Computer Use controls another app.
 While the code is visible, clicking away does not dismiss the menu. Clicking
 the code copies it and opens the verification page.
 
-The profile menu displays combined weekly usage followed by one row per
-subscription. Email addresses remain masked until hovered. The final row always
-starts another sign-in.
+The profile menu displays combined five-hour and weekly usage followed by one
+row per subscription. Email addresses remain masked until hovered. The final
+row always starts another sign-in.
 
 ## Routing behavior
 
 | Situation | Behaviour |
 | --- | --- |
-| New chat | Assigned by quota-at-risk, banked resets, and short-window pressure |
+| New chat | Requires five-hour and weekly capacity, then routes by quota-at-risk and banked resets |
 | Manual account selected | New chats use that subscription while it has capacity |
 | Follow-up | Sent to the thread's persisted account owner |
 | Existing chat manually switched | History is copied atomically and resumed under the selected subscription |
-| Owner depleted | Continued through another account with capacity |
-| Every account depleted | Combined quota alert with the next known reset |
+| Owner already depleted | Moved before the next turn starts |
+| Active turn hits a limit | Terminal failure is preserved, the chat moves, and one `Continue.` turn starts automatically |
+| Every account depleted | Native failure remains visible with the next limiting-window reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
 Choose **Automatic routing** or a specific subscription from the profile menu.
@@ -210,13 +214,13 @@ the target account without modifying the source, and keeps the same visible
 thread ID. If a manually selected new-chat subscription is depleted or
 unavailable, the router safely falls back to an available subscription.
 
-Each subscription row shows its remaining weekly allowance beside a compact
-`DD/MM` reset date, with the local reset time directly beneath it in 24-hour
-format. The subscription assigned to the current thread appears in its pinned
-summary. Secondary rows also include a remove button. Removal requires a
-second confirmation, permanently deletes that slot's isolated login data, and
-is refused while tasks are still assigned to the subscription. The Primary
-account cannot be removed.
+Each subscription row shows separate `5h` and `Week` percentages. The five-hour
+row includes its local 24-hour reset time; the weekly row includes a compact
+`DD/MM` date and local time. The current thread picker uses both windows and
+disables any account depleted in either one. Secondary rows also include a
+remove button. Removal requires a second confirmation, permanently deletes
+that slot's isolated login data, and is refused while tasks are still assigned
+to the subscription. The Primary account cannot be removed.
 
 ## Profiles, plugins, and resets
 

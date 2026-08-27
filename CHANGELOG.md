@@ -18,6 +18,13 @@ this project uses [Semantic Versioning](https://semver.org/).
   data, with safeguards for Primary and subscriptions that still own tasks.
 - In-chat subscription picker and atomic cross-account history handoff for
   existing chats, including paginated Codex rollouts and automatic failover.
+- Five-hour plus weekly quota display and capacity checks for routing, manual
+  selection, pooled depletion, and earliest-reset reporting.
+- Guarded automatic continuation after a structured terminal usage-limit
+  failure: preserve the failed turn, hand off the completed history, and send
+  one text-only `Continue.` turn on the next available subscription.
+- Validated renderer patching and signing for ChatGPT `26.820.60940` build
+  `7119`.
 
 ## [0.1.0] - 2026-08-15
 

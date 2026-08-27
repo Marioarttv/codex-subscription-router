@@ -368,7 +368,7 @@ func (m *Multiplexer) chooseAccountExcluding(ctx context.Context, excluded map[s
 			continue
 		}
 		weekly, short := longestAndShortestWindow(snapshot.RateLimits)
-		if weekly != nil && weekly.UsedPercent >= 100 {
+		if !rateLimitsHaveCapacity(snapshot.RateLimits) {
 			continue
 		}
 		weeklyUsed := 1_000.0
@@ -466,7 +466,7 @@ func (m *Multiplexer) preferredAccount(snapshots []AccountSnapshot, excluded map
 			continue
 		}
 		weekly, short := longestAndShortestWindow(snapshot.RateLimits)
-		if weekly != nil && weekly.UsedPercent >= 100 {
+		if !rateLimitsHaveCapacity(snapshot.RateLimits) {
 			return state.Account{}, RouteReason{}, false
 		}
 		account, ok := m.store.Account(preferredID)
@@ -542,8 +542,7 @@ func aggregateRateLimits(snapshots []AccountSnapshot) (*RateLimits, error) {
 			primary = append(primary, snapshot.RateLimits.Primary)
 			secondary = append(secondary, snapshot.RateLimits.Secondary)
 		}
-		weekly, _ := longestAndShortestWindow(snapshot.RateLimits)
-		if weekly == nil || weekly.UsedPercent < 100 {
+		if rateLimitsHaveCapacity(snapshot.RateLimits) {
 			hasCapacity = true
 		}
 	}
@@ -616,6 +615,57 @@ func duration(window *RateLimitWindow) int64 {
 		return 0
 	}
 	return *window.WindowDurationMins
+}
+
+func rateLimitsHaveCapacity(limits *RateLimits) bool {
+	if limits == nil {
+		return true
+	}
+	if limits.RateLimitReachedType != nil {
+		return false
+	}
+	for _, window := range []*RateLimitWindow{limits.Primary, limits.Secondary} {
+		if window != nil && window.UsedPercent >= 100 {
+			return false
+		}
+	}
+	return true
+}
+
+func nextCapacityReset(snapshots []AccountSnapshot) *int64 {
+	var earliest *int64
+	for _, snapshot := range snapshots {
+		if !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" ||
+			rateLimitsHaveCapacity(snapshot.RateLimits) {
+			continue
+		}
+		limits := snapshot.RateLimits
+		if limits == nil {
+			continue
+		}
+		foundLimitingWindow := false
+		for _, window := range []*RateLimitWindow{limits.Primary, limits.Secondary} {
+			if window == nil || window.UsedPercent < 100 || window.ResetsAt == nil {
+				continue
+			}
+			foundLimitingWindow = true
+			if earliest == nil || *window.ResetsAt < *earliest {
+				value := *window.ResetsAt
+				earliest = &value
+			}
+		}
+		if foundLimitingWindow {
+			continue
+		}
+		for _, window := range []*RateLimitWindow{limits.Primary, limits.Secondary} {
+			if window != nil && window.ResetsAt != nil &&
+				(earliest == nil || *window.ResetsAt < *earliest) {
+				value := *window.ResetsAt
+				earliest = &value
+			}
+		}
+	}
+	return earliest
 }
 
 func contextWithControlTimeout(parent context.Context) (context.Context, context.CancelFunc) {

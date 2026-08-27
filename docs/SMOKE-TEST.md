@@ -16,8 +16,8 @@ signature and reuse the same Apple team as the previous installed build.
 ## Accounts and routing
 
 - Connect at least two subscriptions and confirm photos, plans, masked emails,
-  pooled usage, compact `DD/MM` reset dates, visible 24-hour reset times, and
-  loading states.
+  separate five-hour/weekly percentages, compact weekly `DD/MM` reset dates,
+  visible 24-hour reset times for both windows, and loading states.
 - Select each subscription from the profile menu, start a new chat, and confirm
   the chat is pinned to that subscription. Restore Automatic routing and verify
   that the selection persists after an app restart.
@@ -26,8 +26,14 @@ signature and reuse the same Apple team as the previous installed build.
 - Open an existing chat's Subscription picker, move it to another account, and
   confirm the same thread ID resumes there after an app restart. Verify the
   picker includes emails when account labels are duplicated.
-- Spoof one depleted account and confirm the thread continues on an account with
-  quota. Spoof all accounts depleted and confirm the combined alert.
+- Spoof one account with five-hour usage at 100% but weekly usage below 100%;
+  confirm it is excluded from new turns and disabled in the thread picker.
+- Complete a turn with `status: failed` and
+  `codexErrorInfo: usageLimitExceeded`; confirm the failure appears once, the
+  same thread moves to another account, and exactly one `Continue.` turn starts.
+  Confirm a completed turn and an unrelated failed turn never trigger recovery.
+- Spoof all accounts depleted and confirm the combined alert uses the earliest
+  limiting-window reset, including a five-hour reset when applicable.
 - Open a quota-triggered reset sheet, switch subscriptions, consume a reset, and
   confirm only the selected account changes.
 

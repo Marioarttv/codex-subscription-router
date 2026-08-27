@@ -71,6 +71,8 @@ type Multiplexer struct {
 	serverRoutes   map[string]serverRequestRoute
 	serverSequence atomic.Uint64
 	handoffMu      sync.Mutex
+	activeTurnsMu  sync.Mutex
+	activeTurns    map[string]activeTurnRoute
 
 	outputMu sync.Mutex
 	eventsMu sync.RWMutex
@@ -106,6 +108,7 @@ func New(options Options) (*Multiplexer, error) {
 		inbound:              make(chan backend.Inbound, 1024),
 		externalRoutes:       make(map[string]externalRoute),
 		serverRoutes:         make(map[string]serverRequestRoute),
+		activeTurns:          make(map[string]activeTurnRoute),
 		events:               make(map[chan Event]struct{}),
 		profileClient:        &http.Client{Timeout: 10 * time.Second},
 		profileCache:         make(map[string]profileCacheEntry),
@@ -295,10 +298,21 @@ func (m *Multiplexer) forwardWithExclusions(accountID string, message protocol.M
 		excluded:  cloneAccountSet(excluded),
 	}
 	m.externalMu.Unlock()
+	if message.Method == "turn/start" {
+		m.rememberActiveTurn(externalRoute{
+			accountID: accountID,
+			method:    message.Method,
+			message:   message,
+			excluded:  cloneAccountSet(excluded),
+		}, accountID, "")
+	}
 	if err := child.Send(message); err != nil {
 		m.externalMu.Lock()
 		delete(m.externalRoutes, key)
 		m.externalMu.Unlock()
+		if message.Method == "turn/start" {
+			m.takeActiveTurn(threadIDFromParams(message.Params), accountID, "")
+		}
 		return err
 	}
 	return nil
@@ -490,8 +504,20 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		m.externalMu.Unlock()
 		if ok {
 			if route.method == "turn/start" && isUsageLimitResponse(message) {
+				m.takeActiveTurn(threadIDFromParams(route.message.Params), inbound.AccountID, "")
 				go m.retryTurnAfterUsageLimit(route, inbound.AccountID)
 				return
+			}
+			if route.method == "turn/start" {
+				if message.Error != nil {
+					m.takeActiveTurn(threadIDFromParams(route.message.Params), inbound.AccountID, "")
+				} else {
+					m.bindActiveTurnID(
+						threadIDFromParams(route.message.Params),
+						inbound.AccountID,
+						turnIDFromResult(message.Result),
+					)
+				}
 			}
 			m.learnThreadOwner(route, inbound.AccountID, message.Result)
 			m.writeRaw(inbound.Raw)
@@ -511,6 +537,19 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 			_ = m.store.SetThreadOwner(threadID, inbound.AccountID)
 		}
 	}
+	var automaticContinuation *activeTurnRoute
+	if message.Method == "turn/completed" {
+		completion, ok := parseTurnCompletion(message.Params)
+		if ok {
+			if route, tracked := m.takeActiveTurn(
+				completion.ThreadID,
+				inbound.AccountID,
+				completion.TurnID,
+			); tracked && completion.UsageLimited {
+				automaticContinuation = &route
+			}
+		}
+	}
 	if message.Method == "turn/completed" ||
 		message.Method == "account/login/completed" ||
 		message.Method == "account/updated" {
@@ -518,6 +557,9 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 	}
 	if m.shouldForwardNotification(inbound.AccountID, message.Method) {
 		m.writeRaw(inbound.Raw)
+	}
+	if automaticContinuation != nil {
+		go m.continueTurnAfterUsageLimit(*automaticContinuation, inbound.AccountID)
 	}
 }
 
@@ -746,8 +788,7 @@ func accountHasCapacity(snapshot AccountSnapshot) bool {
 	if !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" {
 		return false
 	}
-	weekly, _ := longestAndShortestWindow(snapshot.RateLimits)
-	return weekly == nil || weekly.UsedPercent < 100
+	return rateLimitsHaveCapacity(snapshot.RateLimits)
 }
 
 func isUsageLimitResponse(message protocol.Message) bool {
@@ -766,11 +807,8 @@ func (m *Multiplexer) allSubscriptionsDepleted(ctx context.Context, id json.RawM
 	var resetsAt *int64
 	if preview := m.currentRateLimitPreview(); preview != nil && preview.Mode.isAllDepleted() {
 		resetsAt = preview.ResetsAt
-	} else if limits, err := m.AggregatedRateLimits(ctx); err == nil {
-		weekly, _ := longestAndShortestWindow(limits)
-		if weekly != nil {
-			resetsAt = weekly.ResetsAt
-		}
+	} else {
+		resetsAt = nextCapacityReset(m.accountSnapshots(ctx, false))
 	}
 	return allSubscriptionsDepleted(id, resetsAt)
 }

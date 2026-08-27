@@ -328,11 +328,21 @@ function CodexMuxAccountMenu() {
   const weeklyWindows = connected.map((account) =>
     codexMuxWeeklyWindow(account.rateLimits),
   );
-  const hasCompleteUsage =
+  const shortWindows = connected.map((account) =>
+    codexMuxShortWindow(account.rateLimits),
+  );
+  const hasCompleteWeeklyUsage =
     connected.length > 0 && weeklyWindows.every((weekly) => weekly != null);
-  const totalRemaining = weeklyWindows.reduce(
+  const hasCompleteShortUsage =
+    connected.length > 0 && shortWindows.every((short) => short != null);
+  const totalWeeklyRemaining = weeklyWindows.reduce(
     (total, weekly) =>
       total + (weekly == null ? 0 : Math.max(0, 100 - weekly.usedPercent)),
+    0,
+  );
+  const totalShortRemaining = shortWindows.reduce(
+    (total, short) =>
+      total + (short == null ? 0 : Math.max(0, 100 - short.usedPercent)),
     0,
   );
 
@@ -444,16 +454,16 @@ function CodexMuxAccountMenu() {
         LeftIcon: S2,
         SubText: loading
           ? "Connecting subscriptions…"
-          : connected.length === 1
-            ? "1 connected subscription"
-            : `${connected.length} connected subscriptions`,
+          : `${connected.length === 1 ? "1 connected subscription" : `${connected.length} connected subscriptions`}${hasCompleteWeeklyUsage ? ` · Week ${Math.round(totalWeeklyRemaining)}%` : ""}`,
         rightIcon: (0, e7.jsx)("span", {
           className: "text-token-description-foreground tabular-nums",
           children: loading
             ? "…"
-            : hasCompleteUsage
-              ? `${Math.round(totalRemaining)}%`
-              : "–",
+            : hasCompleteShortUsage
+              ? `5h ${Math.round(totalShortRemaining)}%`
+              : hasCompleteWeeklyUsage
+                ? `Week ${Math.round(totalWeeklyRemaining)}%`
+                : "–",
         }),
         onSelect: () => BW(modalScope, CodexMuxUsageModal, {}),
         children: "Usage remaining",
@@ -489,9 +499,12 @@ function CodexMuxAccountMenu() {
   }
 
   for (const account of connected) {
+    const short = codexMuxShortWindow(account.rateLimits);
     const weekly = codexMuxWeeklyWindow(account.rateLimits);
-    const weeklyReset = codexMuxWeeklyResetDisplay(account.rateLimits);
-    const remaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
+    const shortReset = codexMuxWindowResetDisplay(short, "Five-hour");
+    const weeklyReset = codexMuxWindowResetDisplay(weekly, "Weekly");
+    const shortRemaining = short == null ? null : Math.max(0, 100 - short.usedPercent);
+    const weeklyRemaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
     rows.push(
       (0, e7.jsx)(
         _H,
@@ -518,23 +531,16 @@ function CodexMuxAccountMenu() {
                     children: "✓",
                   })
                 : null,
-              (0, e7.jsx)("span", {
-                children: remaining == null ? "–" : `${Math.round(remaining)}%`,
-              }),
-              (0, e7.jsx)("span", {
-                "aria-hidden": true,
-                children: "·",
-              }),
               (0, e7.jsxs)("span", {
-                className: "flex flex-col items-end leading-none",
-                "aria-label": weeklyReset.label,
+                className: "flex flex-col items-end gap-1 text-xs leading-none",
+                "aria-label": `${shortReset.label}; ${weeklyReset.label}`,
                 children: [
                   (0, e7.jsx)("span", {
-                    children: weeklyReset.compact,
+                    children: `5h ${shortRemaining == null ? "–" : `${Math.round(shortRemaining)}%`} · ${shortReset.time}`,
                   }),
                   (0, e7.jsx)("span", {
-                    className: "mt-1 text-[11px] text-token-text-tertiary",
-                    children: weeklyReset.time,
+                    className: "text-[11px] text-token-text-tertiary",
+                    children: `Week ${weeklyRemaining == null ? "–" : `${Math.round(weeklyRemaining)}%`} · ${weeklyReset.compact} ${weeklyReset.time}`,
                   }),
                 ],
               }),
@@ -648,13 +654,26 @@ function codexMuxWeeklyWindow(rateLimits) {
   return windows.at(-1) || null;
 }
 
-function codexMuxWeeklyResetDisplay(rateLimits) {
-  const resetSeconds = codexMuxWeeklyWindow(rateLimits)?.resetsAt;
+function codexMuxShortWindow(rateLimits) {
+  const windows = [rateLimits?.primary, rateLimits?.secondary].filter(Boolean);
+  windows.sort(
+    (left, right) =>
+      (left.windowDurationMins || 0) - (right.windowDurationMins || 0),
+  );
+  if (windows.length === 0) return null;
+  if (windows.length === 1 && (windows[0].windowDurationMins || 0) > 1_440) {
+    return null;
+  }
+  return windows[0];
+}
+
+function codexMuxWindowResetDisplay(window, label) {
+  const resetSeconds = window?.resetsAt;
   if (resetSeconds == null) {
     return {
       compact: "--/--",
       time: "--:--",
-      label: "Weekly reset unavailable",
+      label: `${label} reset unavailable`,
     };
   }
   const reset = new Date(resetSeconds * 1_000);
@@ -662,7 +681,7 @@ function codexMuxWeeklyResetDisplay(rateLimits) {
     return {
       compact: "--/--",
       time: "--:--",
-      label: "Weekly reset unavailable",
+      label: `${label} reset unavailable`,
     };
   }
   const day = String(reset.getDate()).padStart(2, "0");
@@ -681,7 +700,7 @@ function codexMuxWeeklyResetDisplay(rateLimits) {
   return {
     compact: `${day}/${month}`,
     time: `${hour}:${minute}`,
-    label: `Weekly reset: ${exact}`,
+    label: `${label} reset: ${exact}`,
   };
 }
 

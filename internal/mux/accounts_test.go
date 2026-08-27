@@ -97,6 +97,81 @@ func TestAggregateRateLimitsReportsAllDepleted(t *testing.T) {
 	}
 }
 
+func TestFiveHourDepletionRemovesAccountCapacity(t *testing.T) {
+	shortMinutes := int64(300)
+	weeklyMinutes := int64(10_080)
+	limits := &RateLimits{
+		Primary: &RateLimitWindow{
+			UsedPercent: 100, WindowDurationMins: &shortMinutes,
+		},
+		Secondary: &RateLimitWindow{
+			UsedPercent: 25, WindowDurationMins: &weeklyMinutes,
+		},
+	}
+	if rateLimitsHaveCapacity(limits) {
+		t.Fatal("an exhausted five-hour window must make the account unavailable")
+	}
+	if accountHasCapacity(AccountSnapshot{
+		Enabled: true, Connected: true, AuthType: "chatgpt", RateLimits: limits,
+	}) {
+		t.Fatal("account capacity ignored the exhausted five-hour window")
+	}
+}
+
+func TestAggregateRateLimitsReportsPoolDepletedByFiveHourWindows(t *testing.T) {
+	shortMinutes := int64(300)
+	weeklyMinutes := int64(10_080)
+	limits, err := aggregateRateLimits([]AccountSnapshot{
+		{
+			ID: "one", Enabled: true, Connected: true, AuthType: "chatgpt",
+			RateLimits: &RateLimits{
+				Primary:   &RateLimitWindow{UsedPercent: 100, WindowDurationMins: &shortMinutes},
+				Secondary: &RateLimitWindow{UsedPercent: 20, WindowDurationMins: &weeklyMinutes},
+			},
+		},
+		{
+			ID: "two", Enabled: true, Connected: true, AuthType: "chatgpt",
+			RateLimits: &RateLimits{
+				Primary:   &RateLimitWindow{UsedPercent: 100, WindowDurationMins: &shortMinutes},
+				Secondary: &RateLimitWindow{UsedPercent: 40, WindowDurationMins: &weeklyMinutes},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits.RateLimitReachedType != "rate_limit_reached" {
+		t.Fatalf("five-hour-depleted pool should report depletion: %#v", limits)
+	}
+	if limits.Primary == nil || limits.Primary.UsedPercent != 100 {
+		t.Fatalf("five-hour aggregate was not preserved: %#v", limits.Primary)
+	}
+	if limits.Secondary == nil || limits.Secondary.UsedPercent != 30 {
+		t.Fatalf("weekly aggregate was not preserved: %#v", limits.Secondary)
+	}
+}
+
+func TestNextCapacityResetUsesEarliestLimitingWindow(t *testing.T) {
+	shortMinutes := int64(300)
+	weeklyMinutes := int64(10_080)
+	shortReset := int64(1_800_000_000)
+	weeklyReset := shortReset + 4*24*60*60
+	reset := nextCapacityReset([]AccountSnapshot{{
+		Enabled: true, Connected: true, AuthType: "chatgpt",
+		RateLimits: &RateLimits{
+			Primary: &RateLimitWindow{
+				UsedPercent: 100, WindowDurationMins: &shortMinutes, ResetsAt: &shortReset,
+			},
+			Secondary: &RateLimitWindow{
+				UsedPercent: 50, WindowDurationMins: &weeklyMinutes, ResetsAt: &weeklyReset,
+			},
+		},
+	}})
+	if reset == nil || *reset != shortReset {
+		t.Fatalf("next reset = %#v, want five-hour reset %d", reset, shortReset)
+	}
+}
+
 func TestRouteUrgencyPrefersQuotaExpiringSooner(t *testing.T) {
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
 	weeklyMinutes := int64(10_080)
@@ -222,5 +297,38 @@ func TestPreferredAccountFallsBackWhenSelectedAccountIsDepleted(t *testing.T) {
 	}}, nil)
 	if ok {
 		t.Fatal("a depleted manual target should fall back to automatic routing")
+	}
+}
+
+func TestPreferredAccountFallsBackWhenFiveHourWindowIsDepleted(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoutingAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := New(Options{
+		RealExecutable: "/bin/false", Store: store, Output: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shortMinutes := int64(300)
+	weeklyMinutes := int64(10_080)
+	_, _, ok := multiplexer.preferredAccount([]AccountSnapshot{{
+		ID: secondary.ID, Enabled: true, Connected: true, AuthType: "chatgpt",
+		RateLimits: &RateLimits{
+			Primary:   &RateLimitWindow{UsedPercent: 100, WindowDurationMins: &shortMinutes},
+			Secondary: &RateLimitWindow{UsedPercent: 10, WindowDurationMins: &weeklyMinutes},
+		},
+	}}, nil)
+	if ok {
+		t.Fatal("manual routing should fall back when the five-hour window is depleted")
 	}
 }
