@@ -21,6 +21,12 @@ signature and reuse the same Apple team as the previous installed build.
 - Select each subscription from the profile menu, start a new chat, and confirm
   the chat is pinned to that subscription. Restore Automatic routing and verify
   that the selection persists after an app restart.
+- On the home screen, confirm the profile footer says `Next task` and displays
+  Automatic routing or the manually pinned account without opening the menu.
+- Open an existing task and confirm the footer changes to `Using now`. Collapse
+  the task-summary panel and verify the header still shows the `Using` account
+  dropdown. Switch through that dropdown and confirm both indicators update;
+  duplicate labels must be distinguishable by email.
 - Start chats until each account has received one; confirm every follow-up stays
   on its original account.
 - Open an existing chat's Subscription picker, move it to another account, and

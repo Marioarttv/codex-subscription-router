@@ -32,6 +32,14 @@ threads. Once a thread ID is known, `state.json` persists its owner. Requests,
 responses, approvals, and notifications are rewritten only as needed to
 preserve one coherent desktop session.
 
+The renderer presents those two scopes separately. The persistent profile
+footer resolves the current route and labels its value as either `Next task` or
+`Using now`. Existing local-task headers also expose a permanent `Using`
+selector backed by `PATCH /v1/thread-account`; it shares the same capacity
+checks and atomic handoff path as the detailed task-summary selector. Both
+surfaces refresh after routing, account, manual-move, and automatic-failover
+events.
+
 If the owner is depleted before a turn starts, the multiplexer resumes the
 rollout on an account with capacity and updates ownership. It also tracks each
 accepted turn until `turn/completed`. A terminal `failed` turn whose structured

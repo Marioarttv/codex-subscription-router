@@ -25,6 +25,9 @@ this project uses [Semantic Versioning](https://semver.org/).
   one text-only `Continue.` turn on the next available subscription.
 - Validated renderer patching and signing for ChatGPT `26.820.60940` build
   `7119`.
+- Persistent account identity in the profile footer, with explicit `Next task`
+  versus `Using now` semantics, plus an always-visible existing-task header
+  dropdown that performs safe cross-account handoff.
 
 ## [0.1.0] - 2026-08-15
 

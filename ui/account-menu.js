@@ -36,6 +36,292 @@ async function codexMuxRequest(path, options = {}) {
   return body;
 }
 
+function codexMuxThreadIdFromLocation() {
+  const match = window.location.pathname.match(
+    /\/(?:local|work\/conversation)\/([^/?#]+)/,
+  );
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function codexMuxHeaderAccountId() {
+  const selector = document.querySelector(
+    'select[aria-label="Subscription used by this task"]',
+  );
+  return selector?.value || null;
+}
+
+function codexMuxAccountCanRoute(account) {
+  if (!account?.enabled || !account?.connected) return false;
+  const limits = account.rateLimits;
+  if (limits?.rateLimitReachedType != null) return false;
+  return [limits?.primary, limits?.secondary].every(
+    (window) => window == null || window.usedPercent < 100,
+  );
+}
+
+function codexMuxAccountIdentity(account) {
+  return account?.email || account?.label || "Unknown subscription";
+}
+
+function CodexMuxPersistentAccountStatus({
+  threadId: explicitThreadId = null,
+  placement = "header",
+}) {
+  const [locationThreadId, setLocationThreadId] = kXc.useState(() =>
+    explicitThreadId || codexMuxThreadIdFromLocation(),
+  );
+  const [headerAccountId, setHeaderAccountId] = kXc.useState(() =>
+    explicitThreadId ? null : codexMuxHeaderAccountId(),
+  );
+  const [status, setStatus] = kXc.useState(null);
+  const [accounts, setAccounts] = kXc.useState([]);
+  const [busy, setBusy] = kXc.useState(false);
+  const [error, setError] = kXc.useState("");
+  const threadId = explicitThreadId || locationThreadId;
+
+  kXc.useEffect(() => {
+    if (explicitThreadId) {
+      setLocationThreadId(explicitThreadId);
+      return undefined;
+    }
+    const updateLocation = () => {
+      const nextThreadId = codexMuxThreadIdFromLocation();
+      setLocationThreadId((current) =>
+        current === nextThreadId ? current : nextThreadId,
+      );
+      const nextHeaderAccountId = codexMuxHeaderAccountId();
+      setHeaderAccountId((current) =>
+        current === nextHeaderAccountId ? current : nextHeaderAccountId,
+      );
+    };
+    updateLocation();
+    const routeTimer = setInterval(updateLocation, 750);
+    window.addEventListener("popstate", updateLocation);
+    return () => {
+      clearInterval(routeTimer);
+      window.removeEventListener("popstate", updateLocation);
+    };
+  }, [explicitThreadId]);
+
+  kXc.useEffect(() => {
+    let active = true;
+    setStatus(null);
+    const refresh = async () => {
+      try {
+        if (threadId) {
+          const [threadResult, poolResult] = await Promise.all([
+            codexMuxRequest(
+              `/thread-account?threadId=${encodeURIComponent(threadId)}`,
+            ),
+            codexMuxRequest("/accounts"),
+          ]);
+          if (!active) return;
+          setAccounts(poolResult.accounts || []);
+          setStatus({ mode: "current", account: threadResult.account || null });
+        } else if (headerAccountId) {
+          const poolResult = await codexMuxRequest("/accounts");
+          if (!active) return;
+          const nextAccounts = poolResult.accounts || [];
+          setAccounts(nextAccounts);
+          setStatus({
+            mode: "current",
+            account:
+              nextAccounts.find((account) => account.id === headerAccountId) ||
+              null,
+          });
+        } else {
+          const poolResult = await codexMuxRequest("/accounts");
+          if (!active) return;
+          const nextAccounts = poolResult.accounts || [];
+          const routedAccount = poolResult.routingAccountId
+            ? nextAccounts.find(
+                (account) => account.id === poolResult.routingAccountId,
+              ) || null
+            : null;
+          setAccounts(nextAccounts);
+          setStatus({
+            mode: "next",
+            account: routedAccount,
+            automatic: !poolResult.routingAccountId,
+          });
+        }
+        setError("");
+      } catch (requestError) {
+        if (!active) return;
+        setError(requestError.message || "Subscription status unavailable");
+        if (threadId) setStatus({ mode: "current", account: null });
+      }
+    };
+
+    refresh();
+    const events = new EventSource(
+      `${CODEX_MUX_API}/events?token=${encodeURIComponent(CODEX_MUX_TOKEN)}`,
+    );
+    events.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const relevantThreadEvent =
+          payload.data?.threadId === threadId &&
+          (payload.type === "thread-moved" ||
+            payload.type === "thread-failed-over" ||
+            payload.type === "thread-failover-failed" ||
+            payload.type === "thread-failover-unavailable");
+        if (
+          payload.type === "account-updated" ||
+          payload.type === "account-removed" ||
+          payload.type === "routing-updated" ||
+          relevantThreadEvent
+        ) {
+          refresh();
+        }
+      } catch {}
+    };
+    const warmupTimer = setTimeout(refresh, 2_000);
+    const refreshTimer = setInterval(refresh, 30_000);
+    return () => {
+      active = false;
+      clearTimeout(warmupTimer);
+      clearInterval(refreshTimer);
+      events.close();
+    };
+  }, [threadId, headerAccountId]);
+
+  async function moveThread(event) {
+    const accountId = event.currentTarget.value;
+    if (!threadId || !accountId || accountId === status?.account?.id || busy) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await codexMuxRequest("/thread-account", {
+        method: "PATCH",
+        body: JSON.stringify({ threadId, accountId }),
+      });
+      setStatus({ mode: "current", account: result.account || null });
+    } catch (requestError) {
+      setError(requestError.message || "Could not switch subscription");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const account = status?.account || null;
+  const identity = codexMuxAccountIdentity(account);
+  const title = !status
+    ? "Loading subscription status"
+    : error
+      ? error
+    : status?.mode === "current"
+      ? account
+        ? `Using ${account.label}${account.email ? ` (${account.email})` : ""}`
+        : "Assigning a subscription to this task"
+      : status?.automatic
+        ? "Next task will use automatic routing"
+        : `Next task will use ${identity}`;
+
+  if (placement === "footer") {
+    return (0, e7.jsxs)("span", {
+      className: "flex min-w-0 flex-1 items-center gap-2",
+      title,
+      "aria-label": title,
+      children: [
+        account
+          ? (0, e7.jsx)(CodexMuxAccountAvatar, {
+              imageUrl: account.profileImageUrl,
+              label: account.label,
+              className: "size-6 shrink-0",
+            })
+          : (0, e7.jsx)(CodexMuxAutoIcon, {
+              className: "size-5 shrink-0 text-token-text-secondary",
+            }),
+        (0, e7.jsxs)("span", {
+          className: "flex min-w-0 flex-1 flex-col leading-tight",
+          children: [
+            (0, e7.jsx)("span", {
+              className: "truncate text-sm text-token-text-primary",
+              children:
+                !status
+                  ? "Loading subscription…"
+                  : status.mode === "current"
+                  ? account
+                    ? identity
+                    : "Assigning subscription…"
+                  : status?.automatic
+                    ? "Automatic routing"
+                    : identity,
+            }),
+            (0, e7.jsx)("span", {
+              className: "truncate text-[10px] text-token-text-tertiary",
+              children:
+                !status
+                  ? "Router status"
+                  : status.mode === "current"
+                  ? `Using now${account?.label ? ` · ${account.label}` : ""}`
+                  : "Next task",
+            }),
+          ],
+        }),
+      ],
+    });
+  }
+
+  const connected = accounts.filter(
+    (candidate) => candidate.connected && candidate.enabled,
+  );
+  return (0, e7.jsxs)("div", {
+    className:
+      "flex h-8 max-w-[250px] items-center gap-1.5 rounded-lg border border-token-border-light bg-token-bg-primary px-2 text-xs shadow-sm",
+    title,
+    "aria-label": title,
+    children: [
+      account
+        ? (0, e7.jsx)(CodexMuxAccountAvatar, {
+            imageUrl: account.profileImageUrl,
+            label: account.label,
+            className: "size-4 shrink-0",
+          })
+        : null,
+      (0, e7.jsx)("span", {
+        className: "shrink-0 text-token-text-tertiary",
+        children: busy ? "Moving" : "Using",
+      }),
+      account
+        ? (0, e7.jsx)("select", {
+            className:
+              "min-w-0 max-w-[185px] flex-1 truncate bg-transparent font-medium text-token-text-primary outline-none",
+            value: account.id,
+            disabled: busy,
+            title: "Switch this task to another subscription",
+            "aria-label": "Subscription used by this task",
+            onChange: moveThread,
+            children: connected.map((candidate) =>
+              (0, e7.jsx)(
+                "option",
+                {
+                  value: candidate.id,
+                  disabled:
+                    candidate.id !== account.id &&
+                    !codexMuxAccountCanRoute(candidate),
+                  children: codexMuxAccountIdentity(candidate),
+                },
+                candidate.id,
+              ),
+            ),
+          })
+        : (0, e7.jsx)("span", {
+            className: "truncate text-token-text-secondary",
+            children: "Assigning…",
+          }),
+    ],
+  });
+}
+
 const CODEX_MUX_ACCOUNT_SCOPED_PLUGIN_METHODS = new Set([
   "list-apps",
   "list-installed-apps",
@@ -1064,6 +1350,7 @@ function CodexMuxPluginScope() {
 // Export the same avatar component so both surfaces share image resolution,
 // error handling, and the initials fallback.
 globalThis.CodexMuxAccountAvatar = CodexMuxAccountAvatar;
+globalThis.CodexMuxPersistentAccountStatus = CodexMuxPersistentAccountStatus;
 globalThis.codexMuxProfileData = codexMuxProfileData;
 globalThis.CodexMuxProfileAvatarStack = (props) =>
   (0, e7.jsx)(CodexMuxProfileAvatarStack, props || {});

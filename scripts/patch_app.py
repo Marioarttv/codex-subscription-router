@@ -834,6 +834,41 @@ def patch_renderer(extracted: Path, token: str) -> None:
             component = re.sub(rf"\b{re.escape(original)}\b", replacement, component)
     bundle = bundle.replace(component_anchor, component + "\n" + component_anchor, 1)
 
+    footer_marker = "codex.profileFooter.openProfileMenu"
+    if bundle.count(footer_marker) != 1:
+        raise RuntimeError("could not find the native profile footer")
+    footer_marker_index = bundle.index(footer_marker)
+    footer_start = bundle.rfind("function ", 0, footer_marker_index)
+    footer_end = bundle.find("function ", footer_marker_index)
+    if footer_start == -1 or footer_end == -1:
+        raise RuntimeError("could not isolate the native profile footer component")
+    footer_component = bundle[footer_start:footer_end]
+    footer_button_pattern = re.compile(
+        r"(?P<prefix>\(0,(?P<runtime>[A-Za-z_$][\w$]*)\.jsxs\)"
+        r"\(`button`,\{className:[A-Za-z_$][\w$]*,type:`button`,"
+        r'"aria-label":[A-Za-z_$][\w$]*,onClick:[A-Za-z_$][\w$]*,children:)'
+        r"\[(?P<avatar>[A-Za-z_$][\w$]*),(?P<label>[A-Za-z_$][\w$]*)\]"
+    )
+    footer_matches = list(footer_button_pattern.finditer(footer_component))
+    if len(footer_matches) != 1:
+        raise RuntimeError("could not find the native profile footer button contents")
+    footer_match = footer_matches[0]
+    footer_runtime = footer_match.group("runtime")
+    footer_avatar = footer_match.group("avatar")
+    footer_label = footer_match.group("label")
+    footer_replacement = (
+        footer_match.group("prefix")
+        + f"[{footer_label}==null?{footer_avatar}:"
+        + f"(0,{footer_runtime}.jsx)(globalThis.CodexMuxPersistentAccountStatus,"
+        + "{placement:`footer`})]"
+    )
+    footer_component = (
+        footer_component[: footer_match.start()]
+        + footer_replacement
+        + footer_component[footer_match.end() :]
+    )
+    bundle = bundle[:footer_start] + footer_component + bundle[footer_end:]
+
     legacy_plugin_rpc_mapping_anchors = (
         '"list-apps":q9((e,{priority:t,source:n,timeoutMs:r,trace:i,...a})=>'
         "e.sendRequest(`app/list`,a,",
@@ -1332,6 +1367,74 @@ def patch_renderer(extracted: Path, token: str) -> None:
         1,
     )
     thread_bundle_path.write_text(thread_bundle, encoding="utf-8")
+
+    page_bundles = list((webview / "assets").glob("local-conversation-page-*.js"))
+    if len(page_bundles) != 1:
+        raise RuntimeError(
+            f"expected one local conversation page bundle, found {len(page_bundles)}"
+        )
+    page_bundle_path = page_bundles[0]
+    page_bundle = page_bundle_path.read_text(encoding="utf-8")
+    header_action_marker = "local-thread-summary-panel-toggle"
+    if page_bundle.count(header_action_marker) != 1:
+        raise RuntimeError("could not find the native local task header actions")
+    header_marker_index = page_bundle.index(header_action_marker)
+    header_component_start = page_bundle.rfind("function ", 0, header_marker_index)
+    header_component_end = page_bundle.find("function ", header_marker_index)
+    if header_component_start == -1 or header_component_end == -1:
+        raise RuntimeError("could not isolate the native local task header component")
+    header_component = page_bundle[header_component_start:header_component_end]
+    thread_id_match = re.search(
+        r"\{conversationId:(?P<thread>[A-Za-z_$][\w$]*)[^}]*\}=e",
+        header_component,
+    )
+    header_action_match = re.search(
+        r"(?P<variable>[A-Za-z_$][\w$]*)="
+        r"\(0,(?P<runtime>[A-Za-z_$][\w$]*)\.jsx\)"
+        r"\((?P<header>[A-Za-z_$][\w$]*)\.HeaderAction,"
+        r"\{actionId:`local-thread-summary-panel-toggle`",
+        header_component,
+    )
+    if thread_id_match is None or header_action_match is None:
+        raise RuntimeError("could not find the local task header account slot")
+    header_expression_start = (
+        header_action_match.start()
+        + len(header_action_match.group("variable"))
+        + 1
+    )
+    header_expression_end = header_component.find(
+        ",t[", header_action_match.end()
+    )
+    if header_expression_end == -1:
+        raise RuntimeError("could not isolate the local task header action expression")
+    header_expression = header_component[
+        header_expression_start:header_expression_end
+    ]
+    header_variable = header_action_match.group("variable")
+    header_runtime = header_action_match.group("runtime")
+    header_namespace = header_action_match.group("header")
+    header_thread_id = thread_id_match.group("thread")
+    header_replacement = (
+        f"{header_variable}=(0,{header_runtime}.jsxs)"
+        f"({header_runtime}.Fragment,{{children:["
+        f"(0,{header_runtime}.jsx)({header_namespace}.HeaderAction,{{"
+        "actionId:`codex-mux-account-status`,align:`end`,order:240,"
+        f"children:(0,{header_runtime}.jsx)("
+        "globalThis.CodexMuxPersistentAccountStatus,{"
+        f"threadId:{header_thread_id},placement:`header`}})}}),"
+        f"{header_expression}]}})"
+    )
+    header_component = (
+        header_component[: header_action_match.start()]
+        + header_replacement
+        + header_component[header_expression_end:]
+    )
+    page_bundle = (
+        page_bundle[:header_component_start]
+        + header_component
+        + page_bundle[header_component_end:]
+    )
+    page_bundle_path.write_text(page_bundle, encoding="utf-8")
 
 
 def patch_desktop_profile(

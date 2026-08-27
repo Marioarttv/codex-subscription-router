@@ -27,6 +27,9 @@ binaries or a prebuilt application.
   bounded boost for accounts holding banked usage resets.
 - **Manual account selection.** Choose Automatic routing or pin new chats to a
   specific connected subscription directly from the profile menu.
+- **Always-visible account identity.** The profile footer distinguishes the
+  next-task route from the current owner, while every existing task exposes a
+  persistent header switcher labeled `Using`.
 - **Sticky conversations.** Once a thread is assigned, every follow-up returns
   to the same subscription unless that subscription is depleted.
 - **Automatic continuation.** A turn that ends on a structured usage-limit
@@ -213,6 +216,14 @@ shows each account's email and remaining quota, copies the current rollout into
 the target account without modifying the source, and keeps the same visible
 thread ID. If a manually selected new-chat subscription is depleted or
 unavailable, the router safely falls back to an available subscription.
+
+The profile footer makes the scope visible without opening the menu. On the
+home/new-task screen it says **Next task** and shows either Automatic routing
+or the pinned subscription. Inside an existing task it says **Using now** and
+shows the owning account. The task header repeats that account as a permanent
+**Using** dropdown; selecting another available account performs the same
+atomic history handoff as the detailed Subscription picker. Account emails are
+shown so identically named slots remain distinguishable.
 
 Each subscription row shows separate `5h` and `Week` percentages. The five-hour
 row includes its local 24-hour reset time; the weekly row includes a compact
