@@ -21,19 +21,17 @@ signature and reuse the same Apple team as the previous installed build.
 - Select each subscription from the profile menu, start a new chat, and confirm
   the chat is pinned to that subscription. Restore Automatic routing and verify
   that the selection persists after an app restart.
-- On the home screen, confirm the profile footer says `Next task` and displays
-  Automatic routing or the manually pinned account without opening the menu.
-- Open an existing task and confirm the footer changes to `Using now`. Collapse
-  the task-summary panel and verify the header still shows the `Using` account
-  dropdown. Switch through that dropdown and confirm both indicators update;
-  duplicate labels must be distinguishable by email.
+- Confirm the footer is status-only: it says `Next task` on the home screen and
+  `Using now` inside a task. Confirm there is no account selector in the task
+  header or task details panel.
 - Start chats until each account has received one; confirm every follow-up stays
   on its original account.
-- Open an existing chat's Subscription picker, move it to another account, and
+- Open an existing task, use its profile-menu account rows to move it, and
   confirm the same thread ID resumes there after an app restart. Verify the
-  picker includes emails when account labels are duplicated.
+  footer changes only after the handoff succeeds and duplicate labels remain
+  distinguishable by email.
 - Spoof one account with five-hour usage at 100% but weekly usage below 100%;
-  confirm it is excluded from new turns and disabled in the thread picker.
+  confirm it is excluded from new turns and rejected as a handoff target.
 - Complete a turn with `status: failed` and
   `codexErrorInfo: usageLimitExceeded`; confirm the failure appears once, the
   same thread moves to another account, and exactly one `Continue.` turn starts.

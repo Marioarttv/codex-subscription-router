@@ -2,12 +2,45 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
+
+func TestMoveThreadRejectsActiveTurnBeforeHandoff(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.AddAccount("Secondary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const threadID = "thread-active"
+	if err := store.SetThreadOwner(threadID, "primary"); err != nil {
+		t.Fatal(err)
+	}
+	multiplexer, err := New(Options{
+		RealExecutable: "/bin/false", Store: store, Output: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiplexer.activeTurns[threadID] = activeTurnRoute{}
+
+	_, err = multiplexer.MoveThread(context.Background(), threadID, target.ID)
+	if err == nil || !strings.Contains(err.Error(), "current turn") {
+		t.Fatalf("active turn handoff error = %v", err)
+	}
+	if owner, ok := store.ThreadOwner(threadID); !ok || owner != "primary" {
+		t.Fatalf("active turn changed owner to %q", owner)
+	}
+}
 
 func TestPlanLabel(t *testing.T) {
 	tests := map[string]string{

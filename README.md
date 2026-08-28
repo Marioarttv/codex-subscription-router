@@ -25,11 +25,11 @@ binaries or a prebuilt application.
 - **Two-window quota routing.** Five-hour capacity is enforced for every turn;
   new chats then favour weekly allowance that will expire sooner, with a
   bounded boost for accounts holding banked usage resets.
-- **Manual account selection.** Choose Automatic routing or pin new chats to a
-  specific connected subscription directly from the profile menu.
-- **Always-visible account identity.** The profile footer distinguishes the
-  next-task route from the current owner, while every existing task exposes a
-  persistent header switcher labeled `Using`.
+- **One account selector.** The profile menu is the only account switcher. On
+  the home screen it chooses Automatic routing or a subscription for the next
+  task; inside a task, the same rows move that task to another subscription.
+- **Always-visible account status.** The profile footer shows whether its
+  account applies to the next task or the task currently open.
 - **Sticky conversations.** Once a thread is assigned, every follow-up returns
   to the same subscription unless that subscription is depleted.
 - **Automatic continuation.** A turn that ends on a structured usage-limit
@@ -209,26 +209,19 @@ row always starts another sign-in.
 | Every account depleted | Native failure remains visible with the next limiting-window reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
-Choose **Automatic routing** or a specific subscription from the profile menu.
-The selected mode persists across app restarts and applies to new chats. For an
-existing chat, use the **Subscription** picker in its details panel. That picker
-shows each account's email and remaining quota, copies the current rollout into
-the target account without modifying the source, and keeps the same visible
-thread ID. If a manually selected new-chat subscription is depleted or
-unavailable, the router safely falls back to an available subscription.
+The profile menu is the single switching surface. On the home screen, choose
+**Automatic routing** or a specific subscription for the next task; that mode
+persists across app restarts. Inside an existing task, the same subscription
+rows instead move the open task. The router copies the current rollout into the
+target without modifying the source and keeps the same visible thread ID. It
+rejects a move while a turn is active or when the target has no quota, leaving
+the current owner unchanged. The footer remains status-only and labels the
+shown account as **Next task** or **Using now**.
 
-The profile footer makes the scope visible without opening the menu. On the
-home/new-task screen it says **Next task** and shows either Automatic routing
-or the pinned subscription. Inside an existing task it says **Using now** and
-shows the owning account. The task header repeats that account as a permanent
-**Using** dropdown; selecting another available account performs the same
-atomic history handoff as the detailed Subscription picker. Account emails are
-shown so identically named slots remain distinguishable.
-
-Each subscription row shows separate `5h` and `Week` percentages. The five-hour
+Each subscription row shows separate `5h` and `w` percentages. The five-hour
 row includes its local 24-hour reset time; the weekly row includes a compact
-`DD/MM` date and local time. The current thread picker uses both windows and
-disables any account depleted in either one. Secondary rows also include a
+`DD/MM` date and local time. Account moves use both windows and reject any
+target depleted in either one. Secondary rows also include a
 remove button. Removal requires a second confirmation, permanently deletes
 that slot's isolated login data, and is refused while tasks are still assigned
 to the subscription. The Primary account cannot be removed.

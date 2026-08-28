@@ -32,13 +32,13 @@ threads. Once a thread ID is known, `state.json` persists its owner. Requests,
 responses, approvals, and notifications are rewritten only as needed to
 preserve one coherent desktop session.
 
-The renderer presents those two scopes separately. The persistent profile
-footer resolves the current route and labels its value as either `Next task` or
-`Using now`. Existing local-task headers also expose a permanent `Using`
-selector backed by `PATCH /v1/thread-account`; it shares the same capacity
-checks and atomic handoff path as the detailed task-summary selector. Both
-surfaces refresh after routing, account, manual-move, and automatic-failover
-events.
+The profile footer is a read-only view of that routing state. The profile menu
+is the only switching surface: on the home screen its rows update the manual
+new-task preference, while inside a task they call `PATCH /v1/thread-account`.
+Both components subscribe to one renderer-side state store, which serializes
+selection changes and refreshes after route, account, handoff, and failover
+events. Manual handoff is rejected while a turn is active or the destination
+has no five-hour or weekly capacity, so a failed move cannot change ownership.
 
 If the owner is depleted before a turn starts, the multiplexer resumes the
 rollout on an account with capacity and updates ownership. It also tracks each

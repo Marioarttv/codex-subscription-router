@@ -204,12 +204,21 @@ func (m *Multiplexer) MoveThread(ctx context.Context, threadID, targetAccountID 
 	if sourceAccountID == targetAccountID {
 		return m.accountSnapshotWithProfile(ctx, targetAccountID, true)
 	}
+	m.activeTurnsMu.Lock()
+	_, turnActive := m.activeTurns[threadID]
+	m.activeTurnsMu.Unlock()
+	if turnActive {
+		return AccountSnapshot{}, errors.New("wait for the current turn to finish before switching subscriptions")
+	}
 	target, err := m.accountSnapshotWithProfile(ctx, targetAccountID, true)
 	if err != nil {
 		return AccountSnapshot{}, err
 	}
 	if !target.Enabled || !target.Connected {
 		return AccountSnapshot{}, fmt.Errorf("%s is not connected", target.Label)
+	}
+	if !rateLimitsHaveCapacity(target.RateLimits) {
+		return AccountSnapshot{}, fmt.Errorf("%s has no available quota", target.Label)
 	}
 	if err := m.handoffThread(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
 		return AccountSnapshot{}, err

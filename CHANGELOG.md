@@ -16,8 +16,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   in the profile menu.
 - Confirmed removal of secondary subscription profiles and their isolated login
   data, with safeguards for Primary and subscriptions that still own tasks.
-- In-chat subscription picker and atomic cross-account history handoff for
-  existing chats, including paginated Codex rollouts and automatic failover.
+- Atomic cross-account history handoff for existing chats, including paginated
+  Codex rollouts and automatic failover.
 - Five-hour plus weekly quota display and capacity checks for routing, manual
   selection, pooled depletion, and earliest-reset reporting.
 - Guarded automatic continuation after a structured terminal usage-limit
@@ -25,9 +25,11 @@ this project uses [Semantic Versioning](https://semver.org/).
   one text-only `Continue.` turn on the next available subscription.
 - Validated renderer patching and signing for ChatGPT `26.820.60940` build
   `7119`.
-- Persistent account identity in the profile footer, with explicit `Next task`
-  versus `Using now` semantics, plus an always-visible existing-task header
-  dropdown that performs safe cross-account handoff.
+- One context-aware account selector in the profile menu: it sets the next-task
+  route on the home screen and moves the current task inside a conversation.
+  A status-only footer always shows that scope and account; the duplicate task
+  header and details-panel selectors were removed.
+- Shortened visible weekly quota labels to `w` in compact account controls.
 
 ## [0.1.0] - 2026-08-15
 
