@@ -62,6 +62,10 @@ TESTED_SOURCE_BUILDS = {
         "26.825.51511",
         "7377",
     ): "f56ac8d5254a10fc4a04e7417fa787d135c3bbca49bad7d668d4ae65833d40c7",
+    (
+        "26.901.41600",
+        "7982",
+    ): "077cc65356aeae34c5d8b4de0b4cc383f6fb137ed1d69a9b3dfe69ffafa058ab",
 }
 EXPECTED_CUA_IDENTIFIER_REPLACEMENTS = 99
 EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS = 16
@@ -76,6 +80,10 @@ TESTED_SOURCE_LAYOUTS = {
         EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS,
     ),
     ("26.825.51511", "7377"): (
+        49,
+        EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS,
+    ),
+    ("26.901.41600", "7982"): (
         49,
         EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS,
     ),
@@ -116,6 +124,20 @@ def run(command: list[str], *, cwd: Path | None = None) -> None:
 
 def output(command: list[str]) -> str:
     return subprocess.check_output(command, text=True).strip()
+
+
+def asar_header_sha256(asar_path: Path) -> str:
+    with asar_path.open("rb") as handle:
+        prefix = handle.read(16)
+        if len(prefix) != 16 or int.from_bytes(prefix[:4], "little") != 4:
+            raise RuntimeError(f"could not parse ASAR header prefix: {asar_path}")
+        header_size = int.from_bytes(prefix[12:16], "little")
+        if header_size <= 0 or header_size > asar_path.stat().st_size - 16:
+            raise RuntimeError(f"invalid ASAR header size in {asar_path}")
+        header = handle.read(header_size)
+    if len(header) != header_size:
+        raise RuntimeError(f"truncated ASAR header in {asar_path}")
+    return hashlib.sha256(header).hexdigest()
 
 
 def require_tool(name: str) -> None:
@@ -797,8 +819,6 @@ def patch_renderer(extracted: Path, token: str) -> None:
         )
     bundle_path = initial_bundles[0]
     bundle = bundle_path.read_text(encoding="utf-8")
-    if "function CodexMuxAccountMenu(" in bundle:
-        raise RuntimeError("source app already contains the Codex multiplexer menu")
 
     component = (PROJECT_ROOT / "ui" / "account-menu.js").read_text(encoding="utf-8")
     component = component.replace("__CODEX_MUX_CONTROL_PORT__", str(CONTROL_PORT))
@@ -808,13 +828,22 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "function Oql(e){let t=(0,Nql.c)(253),{sidebarFooter:n,triggerButton:r}=e",
         "function zbl(e){let t=(0,Wbl.c)(252),{sidebarFooter:n,triggerButton:r}=e",
         "function jwc(e){let t=(0,Iwc.c)(235),{sidebarFooter:n,triggerButton:r}=e",
+        "function Gmn(e){let t=(0,uY.c)(223),{sidebarFooter:n,triggerButton:r}=e",
     )
-    matching_component_anchors = [
-        anchor for anchor in component_anchors if bundle.count(anchor) == 1
+    menu_bundle_paths = [bundle_path, *(webview / "assets").glob("app-primary-*.js")]
+    matching_components = [
+        (path, anchor)
+        for path in menu_bundle_paths
+        for anchor in component_anchors
+        if path.read_text(encoding="utf-8").count(anchor) == 1
     ]
-    if len(matching_component_anchors) != 1:
+    if len(matching_components) != 1:
         raise RuntimeError("could not find the native ChatGPT profile menu component")
-    component_anchor = matching_component_anchors[0]
+    menu_bundle_path, component_anchor = matching_components[0]
+    menu_bundle = menu_bundle_path.read_text(encoding="utf-8")
+    split_menu_bundle = menu_bundle_path != bundle_path
+    if "function CodexMuxAccountMenu(" in menu_bundle:
+        raise RuntimeError("source app already contains the Codex multiplexer menu")
     if component_anchor.startswith("function Oql("):
         for original, replacement in (
             ("e7", "d7"),
@@ -855,17 +884,33 @@ def patch_renderer(extracted: Path, token: str) -> None:
             ("jLa", "uRo"),
         ):
             component = re.sub(rf"\b{re.escape(original)}\b", replacement, component)
-    bundle = bundle.replace(component_anchor, component + "\n" + component_anchor, 1)
+    elif component_anchor.startswith("function Gmn("):
+        for original, replacement in (
+            ("e7", "dY"),
+            ("kXc", "Xmn"),
+            ("_H", "U_"),
+            ("CH", "Cp"),
+            ("Lo", "MT"),
+            ("Q", "Em"),
+            ("BW", "Bw"),
+            ("QLs", "iq"),
+            ("S2", "Pq"),
+            ("jLa", "yV"),
+        ):
+            component = re.sub(rf"\b{re.escape(original)}\b", replacement, component)
+    menu_bundle = menu_bundle.replace(
+        component_anchor, component + "\n" + component_anchor, 1
+    )
 
     footer_marker = "codex.profileFooter.openProfileMenu"
-    if bundle.count(footer_marker) != 1:
+    if menu_bundle.count(footer_marker) != 1:
         raise RuntimeError("could not find the native profile footer")
-    footer_marker_index = bundle.index(footer_marker)
-    footer_start = bundle.rfind("function ", 0, footer_marker_index)
-    footer_end = bundle.find("function ", footer_marker_index)
+    footer_marker_index = menu_bundle.index(footer_marker)
+    footer_start = menu_bundle.rfind("function ", 0, footer_marker_index)
+    footer_end = menu_bundle.find("function ", footer_marker_index)
     if footer_start == -1 or footer_end == -1:
         raise RuntimeError("could not isolate the native profile footer component")
-    footer_component = bundle[footer_start:footer_end]
+    footer_component = menu_bundle[footer_start:footer_end]
     footer_button_pattern = re.compile(
         r"(?P<prefix>\(0,(?P<runtime>[A-Za-z_$][\w$]*)\.jsxs\)"
         r"\(`button`,\{className:[A-Za-z_$][\w$]*,type:`button`,"
@@ -886,7 +931,21 @@ def patch_renderer(extracted: Path, token: str) -> None:
         + footer_replacement
         + footer_component[footer_match.end() :]
     )
-    bundle = bundle[:footer_start] + footer_component + bundle[footer_end:]
+    menu_bundle = (
+        menu_bundle[:footer_start] + footer_component + menu_bundle[footer_end:]
+    )
+    if not split_menu_bundle:
+        bundle = menu_bundle
+
+    def menu_count(anchor: str) -> int:
+        return (menu_bundle if split_menu_bundle else bundle).count(anchor)
+
+    def menu_replace(anchor: str, replacement: str) -> None:
+        nonlocal bundle, menu_bundle
+        if split_menu_bundle:
+            menu_bundle = menu_bundle.replace(anchor, replacement, 1)
+        else:
+            bundle = bundle.replace(anchor, replacement, 1)
 
     legacy_plugin_rpc_mapping_anchors = (
         '"list-apps":q9((e,{priority:t,source:n,timeoutMs:r,trace:i,...a})=>'
@@ -923,7 +982,8 @@ def patch_renderer(extracted: Path, token: str) -> None:
     if bundle.count(app_server_request_anchor) == 1:
         bundle = bundle.replace(
             app_server_request_anchor,
-            "function gm(e,t,n){let r=codexMuxScopePluginRequest(e,t);"
+            "function gm(e,t,n){let r="
+            "globalThis.codexMuxScopePluginRequest?.(e,t)??t;"
             "return n==null?h6e.sendRequest(e,r):h6e.sendRequest(e,r,n)}",
             1,
         )
@@ -936,7 +996,8 @@ def patch_renderer(extracted: Path, token: str) -> None:
             raise RuntimeError("could not find the native app-server request bridge")
         bundle = bundle.replace(
             direct_request_anchor,
-            direct_request_anchor + "t=codexMuxScopePluginRequest(e,t);",
+            direct_request_anchor
+            + "t=globalThis.codexMuxScopePluginRequest?.(e,t)??t;",
             1,
         )
 
@@ -945,6 +1006,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "let e=await B_.safeGet(`/wham/profiles/me`)",
         "let e=await wb.safeGet(`/wham/profiles/me`)",
         "let e=await uS.safeGet(`/wham/profiles/me`)",
+        "let e=await DO.safeGet(`/wham/profiles/me`)",
     )
     matching_profile_query_anchors = [
         anchor for anchor in profile_query_anchors if bundle.count(anchor) == 1
@@ -954,7 +1016,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
     profile_query_anchor = matching_profile_query_anchors[0]
     bundle = bundle.replace(
         profile_query_anchor,
-        "let e=await codexMuxProfileData("
+        "let e=await globalThis.codexMuxProfileData("
         "globalThis.__codexMuxSelectedProfileAccountId??null)",
         1,
     )
@@ -963,17 +1025,17 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "function QLs(e){",
         "function Bsc(e){",
         "function H6s(e){",
+        "function iq(e){",
     )
     matching_usage_modal_anchors = [
-        anchor for anchor in native_usage_modal_anchors if bundle.count(anchor) == 1
+        anchor for anchor in native_usage_modal_anchors if menu_count(anchor) == 1
     ]
     if len(matching_usage_modal_anchors) != 1:
         raise RuntimeError("could not find the native Usage modal component")
     native_usage_modal_anchor = matching_usage_modal_anchors[0]
-    bundle = bundle.replace(
+    menu_replace(
         native_usage_modal_anchor,
         native_usage_modal_anchor + "CodexMuxUseResetAccountState();",
-        1,
     )
 
     reset_query_anchor = (
@@ -988,7 +1050,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
             reset_query_anchor,
             "function l6r(){let e=window.__codexMuxResetAccountId;return Lt({"
             "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
-            "queryFn:e?()=>codexMuxRateLimitResets(e):u6r,"
+            "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):u6r,"
             "refetchInterval:vm.ONE_MINUTE,staleTime:vm.FIVE_SECONDS})}",
             1,
         )
@@ -1005,7 +1067,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                 reset_query_anchor,
                 "function TCa(){let e=window.__codexMuxResetAccountId;return It({"
                 "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
-                "queryFn:e?()=>codexMuxRateLimitResets(e):ECa,"
+                "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):ECa,"
                 "refetchInterval:jp.ONE_MINUTE,staleTime:jp.FIVE_SECONDS})}",
                 1,
             )
@@ -1022,7 +1084,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                     reset_query_anchor,
                     "function $Aa(){let e=window.__codexMuxResetAccountId;return It({"
                     "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
-                    "queryFn:e?()=>codexMuxRateLimitResets(e):eja,"
+                    "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):eja,"
                     "refetchInterval:Qp.ONE_MINUTE,staleTime:Qp.FIVE_SECONDS})}",
                     1,
                 )
@@ -1034,16 +1096,35 @@ def patch_renderer(extracted: Path, token: str) -> None:
                     "refetchInterval:yx.ONE_MINUTE,staleTime:yx.FIVE_SECONDS},e[0]=t):"
                     "t=e[0],wx(t)}"
                 )
-                if bundle.count(reset_query_anchor) != 1:
-                    raise RuntimeError("could not find the native reset-credit query")
-                bundle = bundle.replace(
-                    reset_query_anchor,
-                    "function adi(){let e=window.__codexMuxResetAccountId;return wx({"
-                    "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
-                    "queryFn:e?()=>codexMuxRateLimitResets(e):odi,"
-                    "refetchInterval:yx.ONE_MINUTE,staleTime:yx.FIVE_SECONDS})}",
-                    1,
-                )
+                if bundle.count(reset_query_anchor) == 1:
+                    bundle = bundle.replace(
+                        reset_query_anchor,
+                        "function adi(){let e=window.__codexMuxResetAccountId;return wx({"
+                        "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
+                        "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):odi,"
+                        "refetchInterval:yx.ONE_MINUTE,staleTime:yx.FIVE_SECONDS})}",
+                        1,
+                    )
+                else:
+                    reset_query_anchor = (
+                        "function T2i(){let e=(0,AK.c)(1);UR(),db(null);let t;return "
+                        "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
+                        "(t={queryKey:[`rate-limit-reset-credits`],queryFn:D2i,"
+                        "select:E2i,refetchInterval:pD.ONE_MINUTE,"
+                        "staleTime:pD.FIVE_SECONDS},e[0]=t):t=e[0],bb(t)}"
+                    )
+                    if bundle.count(reset_query_anchor) != 1:
+                        raise RuntimeError("could not find the native reset-credit query")
+                    bundle = bundle.replace(
+                        reset_query_anchor,
+                        "function T2i(){UR(),db(null);"
+                        "let e=window.__codexMuxResetAccountId;return bb({"
+                        "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
+                        "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):D2i,"
+                        "select:E2i,refetchInterval:pD.ONE_MINUTE,"
+                        "staleTime:pD.FIVE_SECONDS})}",
+                        1,
+                    )
 
     reset_mutation_anchor = (
         "function d6r(){let e=(0,$F.c)(3),t=lt(),n=zO(),r;return "
@@ -1059,7 +1140,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
             reset_mutation_anchor,
             "function d6r(){let e=lt(),t=zO(),n=window.__codexMuxResetAccountId,"
             "r=[`rate-limit-reset-credits`,n??`primary`];return $t({"
-            "mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):f6r,"
+            "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):f6r,"
             "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
             "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
             "n.credit?.id??a:a;e.setQueryData(r,e=>F3r(e,o,t))}"
@@ -1081,7 +1162,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                 reset_mutation_anchor,
                 "function DCa(){let e=ct(),t=vb(),n=window.__codexMuxResetAccountId,"
                 "r=[`rate-limit-reset-credits`,n??`primary`];return Qt({"
-                "mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):OCa,"
+                "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):OCa,"
                 "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
                 "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
                 "n.credit?.id??a:a;e.setQueryData(r,e=>ZSa(e,o,t))}"
@@ -1103,7 +1184,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                     reset_mutation_anchor,
                     "function tja(){let e=ct(),t=yS(),n=window.__codexMuxResetAccountId,"
                     "r=[`rate-limit-reset-credits`,n??`primary`];return Qt({"
-                    "mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):nja,"
+                    "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):nja,"
                     "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
                     "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
                     "n.credit?.id??a:a;e.setQueryData(r,e=>TAa(e,o,t))}"
@@ -1120,81 +1201,113 @@ def patch_renderer(extracted: Path, token: str) -> None:
                     "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
                     "e[0]=n,e[1]=t,e[2]=r):r=e[2],Ex(r)}"
                 )
-                if bundle.count(reset_mutation_anchor) != 1:
-                    raise RuntimeError("could not find the native reset-credit mutation")
-                bundle = bundle.replace(
-                    reset_mutation_anchor,
-                    "function sdi(){let e=xx(),t=yD(),n=window.__codexMuxResetAccountId,"
-                    "r=[`rate-limit-reset-credits`,n??`primary`];return Ex({"
-                    "mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):cdi,"
-                    "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
-                    "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
-                    "n.credit?.id??a:a;e.setQueryData(r,e=>jui(e,o,t))}"
-                    "Promise.all([t([`rate-limit-status`]),t(r)])}})}",
-                    1,
-                )
+                if bundle.count(reset_mutation_anchor) == 1:
+                    bundle = bundle.replace(
+                        reset_mutation_anchor,
+                        "function sdi(){let e=xx(),t=yD(),"
+                        "n=window.__codexMuxResetAccountId,"
+                        "r=[`rate-limit-reset-credits`,n??`primary`];return Ex({"
+                        "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):cdi,"
+                        "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
+                        "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
+                        "n.credit?.id??a:a;e.setQueryData(r,e=>jui(e,o,t))}"
+                        "Promise.all([t([`rate-limit-status`]),t(r)])}})}",
+                        1,
+                    )
+                else:
+                    reset_mutation_anchor = (
+                        "function O2i(){let e=(0,AK.c)(3),t=gb(),n=dD(),r;return "
+                        "e[0]!==n||e[1]!==t?(r={mutationFn:k2i,onSuccess:(e,r)=>{"
+                        "let{creditId:i}=r,a=e.code;if(a===`reset`||"
+                        "a===`already_redeemed`){let n=e.code===`reset`?"
+                        "e.credit?.id??i:i;t.setQueryData([`rate-limit-reset-credits`],"
+                        "e=>d0i(e,a,n))}Promise.all([n([`rate-limit-status`]),"
+                        "n([`rate-limit-reset-credits`])])}},e[0]=n,e[1]=t,e[2]=r):"
+                        "r=e[2],Cb(r)}"
+                    )
+                    if bundle.count(reset_mutation_anchor) != 1:
+                        raise RuntimeError("could not find the native reset-credit mutation")
+                    bundle = bundle.replace(
+                        reset_mutation_anchor,
+                        "function O2i(){let e=gb(),t=dD(),"
+                        "n=window.__codexMuxResetAccountId,"
+                        "r=[`rate-limit-reset-credits`,n??`primary`];return Cb({"
+                        "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):k2i,"
+                        "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
+                        "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
+                        "n.credit?.id??a:a;e.setQueryData(r,e=>d0i(e,o,t))}"
+                        "Promise.all([t([`rate-limit-status`]),t(r)])}})}",
+                        1,
+                    )
 
     selected_usage_anchor = "let y=v;if(g!=null){"
-    if bundle.count(selected_usage_anchor) != 1:
+    if menu_count(selected_usage_anchor) != 1:
         raise RuntimeError("could not find the native usage-window selection")
-    bundle = bundle.replace(
+    menu_replace(
         selected_usage_anchor,
         "let y=window.__codexMuxSelectedUsageWindows??v;if(g!=null){",
-        1,
     )
 
     usage_header_anchor = (
         "let ve;t[46]===ge?ve=t[47]:"
         "(ve=(0,k2.jsxs)(LL,{children:[ge,_e]}),t[46]=ge,t[47]=ve);"
     )
-    if bundle.count(usage_header_anchor) == 1:
-        bundle = bundle.replace(
+    if menu_count(usage_header_anchor) == 1:
+        menu_replace(
             usage_header_anchor,
             "let ve=(0,k2.jsxs)(LL,{children:[ge,_e,"
             "window.__codexMuxResetAccountSelector??null]});",
-            1,
         )
     else:
         usage_header_anchor = (
             "let _e;t[46]===he?_e=t[47]:"
             "(_e=(0,u0.jsxs)(IR,{children:[he,ge]}),t[46]=he,t[47]=_e);"
         )
-        if bundle.count(usage_header_anchor) == 1:
-            bundle = bundle.replace(
+        if menu_count(usage_header_anchor) == 1:
+            menu_replace(
                 usage_header_anchor,
                 "let _e=(0,u0.jsxs)(IR,{children:[he,ge,"
                 "window.__codexMuxResetAccountSelector??null]});",
-                1,
             )
         else:
             usage_header_anchor = (
                 "let _e;t[46]===he?_e=t[47]:"
                 "(_e=(0,u1.jsxs)(vz,{children:[he,ge]}),t[46]=he,t[47]=_e);"
             )
-            if bundle.count(usage_header_anchor) == 1:
-                bundle = bundle.replace(
+            if menu_count(usage_header_anchor) == 1:
+                menu_replace(
                     usage_header_anchor,
                     "let _e=(0,u1.jsxs)(vz,{children:[he,ge,"
                     "window.__codexMuxResetAccountSelector??null]});",
-                    1,
                 )
             else:
                 usage_header_anchor = (
                     "let _e;t[46]===he?_e=t[47]:"
                     "(_e=(0,wQ.jsxs)(ER,{children:[he,ge]}),t[46]=he,t[47]=_e);"
                 )
-                if bundle.count(usage_header_anchor) != 1:
-                    raise RuntimeError("could not find the native Usage sheet header")
-                bundle = bundle.replace(
-                    usage_header_anchor,
-                    "let _e=(0,wQ.jsxs)(ER,{children:[he,ge,"
-                    "window.__codexMuxResetAccountSelector??null]});",
-                    1,
-                )
+                if menu_count(usage_header_anchor) == 1:
+                    menu_replace(
+                        usage_header_anchor,
+                        "let _e=(0,wQ.jsxs)(ER,{children:[he,ge,"
+                        "window.__codexMuxResetAccountSelector??null]});",
+                    )
+                else:
+                    usage_header_anchor = (
+                        "let ge;t[46]===me?ge=t[47]:"
+                        "(ge=(0,rq.jsxs)(iE,{children:[me,he]}),"
+                        "t[46]=me,t[47]=ge);"
+                    )
+                    if menu_count(usage_header_anchor) != 1:
+                        raise RuntimeError("could not find the native Usage sheet header")
+                    menu_replace(
+                        usage_header_anchor,
+                        "let ge=(0,rq.jsxs)(iE,{children:[me,he,"
+                        "window.__codexMuxResetAccountSelector??null]});",
+                    )
 
-    usage_anchors = ("usageItems:Ge", "usageItems:Ct")
+    usage_anchors = ("usageItems:Ge", "usageItems:Ct", "usageItems:Et")
     matching_usage_anchors = [
-        anchor for anchor in usage_anchors if bundle.count(anchor) == 1
+        anchor for anchor in usage_anchors if menu_count(anchor) == 1
     ]
     if len(matching_usage_anchors) != 1:
         raise RuntimeError("could not find the native ChatGPT usage menu slot")
@@ -1203,12 +1316,13 @@ def patch_renderer(extracted: Path, token: str) -> None:
         usage_jsx_runtime = "m8"
     elif component_anchor.startswith("function jwc("):
         usage_jsx_runtime = "u8"
+    elif component_anchor.startswith("function Gmn("):
+        usage_jsx_runtime = "dY"
     else:
         usage_jsx_runtime = "d7" if usage_anchor == "usageItems:Ct" else "e7"
-    bundle = bundle.replace(
+    menu_replace(
         usage_anchor,
         f"usageItems:(0,{usage_jsx_runtime}.jsx)(CodexMuxAccountMenu,{{}})",
-        1,
     )
 
     legacy_open_change_anchors = (
@@ -1227,29 +1341,35 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "triggerButton:Dt,onOpenChange:c,children:[N,null]",
         "open:s,onOpenChange:c,contentWidth:`panel`,triggerButton:Dt,children:Rt",
     )
-    if all(bundle.count(anchor) == 1 for anchor in legacy_open_change_anchors):
+    split_open_change_anchors = (
+        "triggerButton:At,onOpenChange:c,children:[F,null]",
+        "open:s,onOpenChange:c,contentWidth:`panel`,triggerButton:At,children:Vt",
+    )
+    if all(menu_count(anchor) == 1 for anchor in legacy_open_change_anchors):
         open_change_anchors = legacy_open_change_anchors
         open_change_handler = "o"
-    elif all(bundle.count(anchor) == 1 for anchor in modern_open_change_anchors):
+    elif all(menu_count(anchor) == 1 for anchor in modern_open_change_anchors):
         open_change_anchors = modern_open_change_anchors
         open_change_handler = "l"
-    elif all(bundle.count(anchor) == 1 for anchor in current_open_change_anchors):
+    elif all(menu_count(anchor) == 1 for anchor in current_open_change_anchors):
         open_change_anchors = current_open_change_anchors
         open_change_handler = "l"
-    elif all(bundle.count(anchor) == 1 for anchor in latest_open_change_anchors):
+    elif all(menu_count(anchor) == 1 for anchor in latest_open_change_anchors):
         open_change_anchors = latest_open_change_anchors
+        open_change_handler = "c"
+    elif all(menu_count(anchor) == 1 for anchor in split_open_change_anchors):
+        open_change_anchors = split_open_change_anchors
         open_change_handler = "c"
     else:
         raise RuntimeError("could not find the native profile menu open-state hooks")
     for anchor in open_change_anchors:
-        bundle = bundle.replace(
+        menu_replace(
             anchor,
             anchor.replace(
                 f"onOpenChange:{open_change_handler}",
                 "onOpenChange:CodexMuxProfileMenuOpenChange("
                 f"{open_change_handler})",
             ),
-            1,
         )
 
     depleted_alert_anchors = (
@@ -1258,16 +1378,21 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "defaultMessage:`You’ve reached your usage limit`",
     )
     for depleted_anchor in depleted_alert_anchors:
-        if bundle.count(depleted_anchor) != 1:
+        if menu_count(depleted_anchor) != 1:
             raise RuntimeError("could not find a native subscription depletion alert")
-        bundle = bundle.replace(
+        menu_replace(
             depleted_anchor,
             "defaultMessage:`All connected subscriptions are depleted`",
-            1,
         )
     bundle_path.write_text(bundle, encoding="utf-8")
+    if split_menu_bundle:
+        menu_bundle_path.write_text(menu_bundle, encoding="utf-8")
 
-    profile_bundles = list((webview / "assets").glob("profile-*.js"))
+    profile_bundles = [
+        path
+        for path in (webview / "assets").glob("profile-*.js")
+        if not path.name.startswith("profile-state-")
+    ]
     if len(profile_bundles) != 1:
         raise RuntimeError(
             f"expected one native Profile settings bundle, found {len(profile_bundles)}"
@@ -1348,19 +1473,39 @@ def patch_renderer(extracted: Path, token: str) -> None:
                     "{\"aria-busy\":ht,className:`flex flex-col items-center`,"
                     "children:vt}),t[91]=ht,t[92]=vt,t[93]=yt):yt=t[93];"
                 )
-                if profile_bundle.count(profile_section_anchor) != 1:
-                    raise RuntimeError("could not find the native Profile avatar")
-                profile_bundle = profile_bundle.replace(
-                    profile_section_anchor,
-                    "let yt;t[91]!==ht||t[92]!==vt?(yt=(0,$.jsxs)(`section`,"
-                    "{\"aria-busy\":ht,className:`flex flex-col items-center`,"
-                    "children:[globalThis.CodexMuxProfileAvatarStack?.("
-                    "{onSelect:()=>F.refetch()})??null,(0,$.jsx)(`div`,{className:"
-                    "globalThis.__codexMuxSelectedProfileAccountId&&!F.isFetching?"
-                    "`contents`:`hidden`,children:vt})]}),t[91]=ht,t[92]=vt,"
-                    "t[93]=yt):yt=t[93];",
-                    1,
-                )
+                if profile_bundle.count(profile_section_anchor) == 1:
+                    profile_bundle = profile_bundle.replace(
+                        profile_section_anchor,
+                        "let yt;t[91]!==ht||t[92]!==vt?(yt=(0,$.jsxs)(`section`,"
+                        "{\"aria-busy\":ht,className:`flex flex-col items-center`,"
+                        "children:[globalThis.CodexMuxProfileAvatarStack?.("
+                        "{onSelect:()=>F.refetch()})??null,(0,$.jsx)(`div`,{className:"
+                        "globalThis.__codexMuxSelectedProfileAccountId&&!F.isFetching?"
+                        "`contents`:`hidden`,children:vt})]}),t[91]=ht,t[92]=vt,"
+                        "t[93]=yt):yt=t[93];",
+                        1,
+                    )
+                else:
+                    profile_section_anchor = (
+                        "let Et;t[91]!==wt||t[92]!==Tt?"
+                        "(Et=(0,$.jsx)(`section`,{\"aria-busy\":wt,"
+                        "className:`flex flex-col items-center`,children:Tt}),"
+                        "t[91]=wt,t[92]=Tt,t[93]=Et):Et=t[93];"
+                    )
+                    if profile_bundle.count(profile_section_anchor) != 1:
+                        raise RuntimeError("could not find the native Profile avatar")
+                    profile_bundle = profile_bundle.replace(
+                        profile_section_anchor,
+                        "let Et;t[91]!==wt||t[92]!==Tt?"
+                        "(Et=(0,$.jsxs)(`section`,{\"aria-busy\":wt,"
+                        "className:`flex flex-col items-center`,children:["
+                        "globalThis.CodexMuxProfileAvatarStack?.("
+                        "{onSelect:()=>B.refetch()})??null,(0,$.jsx)(`div`,{className:"
+                        "globalThis.__codexMuxSelectedProfileAccountId&&!B.isFetching?"
+                        "`contents`:`hidden`,children:Tt})]}),"
+                        "t[91]=wt,t[92]=Tt,t[93]=Et):Et=t[93];",
+                        1,
+                    )
     profile_bundle_path.write_text(profile_bundle, encoding="utf-8")
 
     plugin_scope_anchor = "action:F,children:w})"
@@ -1486,6 +1631,7 @@ def patch_info_plist(
     app: Path,
     asar_path: Path,
     team_identifier: str | None,
+    use_header_asar_integrity: bool,
 ) -> None:
     plist_path = app / "Contents" / "Info.plist"
     with plist_path.open("rb") as handle:
@@ -1509,7 +1655,11 @@ def patch_info_plist(
         url_type["CFBundleURLSchemes"] = [
             "codex-subscription-router" if value == "codex" else value for value in schemes
         ]
-    digest = hashlib.sha256(asar_path.read_bytes()).hexdigest()
+    digest = (
+        asar_header_sha256(asar_path)
+        if use_header_asar_integrity
+        else hashlib.sha256(asar_path.read_bytes()).hexdigest()
+    )
     info["ElectronAsarIntegrity"] = {
         "Resources/app.asar": {"algorithm": "SHA256", "hash": digest}
     }
@@ -1547,6 +1697,20 @@ def patch_app(
     source_build = str(source_info.get("CFBundleVersion", "unknown"))
     source_asar = source / "Contents" / "Resources" / "app.asar"
     source_asar_hash = hashlib.sha256(source_asar.read_bytes()).hexdigest()
+    source_integrity = (
+        source_info.get("ElectronAsarIntegrity", {})
+        .get("Resources/app.asar", {})
+        .get("hash")
+    )
+    source_header_asar_hash = asar_header_sha256(source_asar)
+    if source_integrity == source_header_asar_hash:
+        use_header_asar_integrity = True
+    elif source_integrity == source_asar_hash:
+        use_header_asar_integrity = False
+    else:
+        raise RuntimeError(
+            "the source app uses an unrecognized Electron ASAR integrity scheme"
+        )
     source_build_key = (source_version, source_build)
     expected_asar_hash = TESTED_SOURCE_BUILDS.get(source_build_key)
     (
@@ -1652,7 +1816,12 @@ def patch_app(
         shutil.copy2(proxy, bundled_codex)
         bundled_codex.chmod(0o755)
 
-        patch_info_plist(staged_app, original_asar, team_identifier)
+        patch_info_plist(
+            staged_app,
+            original_asar,
+            team_identifier,
+            use_header_asar_integrity,
+        )
         print(f"Signing independent app copy with {signing_identity}…")
         sign_independent_app(
             staged_app,

@@ -17,9 +17,9 @@ stops instead of applying a partial patch.
 
 | Component | Tested value |
 | --- | --- |
-| Official ChatGPT version | `26.825.51511` |
-| Official bundle build | `7377` |
-| `app.asar` SHA-256 | `f56ac8d5254a10fc4a04e7417fa787d135c3bbca49bad7d668d4ae65833d40c7` |
+| Official ChatGPT version | `26.901.41600` |
+| Official bundle build | `7982` |
+| `app.asar` SHA-256 | `077cc65356aeae34c5d8b4de0b4cc383f6fb137ed1d69a9b3dfe69ffafa058ab` |
 | Architecture | Apple silicon (`arm64`) |
 
 A different official version may work when all anchors remain identical, but

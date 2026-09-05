@@ -1283,7 +1283,10 @@ function CodexMuxPluginScope() {
 
 globalThis.CodexMuxAccountAvatar = CodexMuxAccountAvatar;
 globalThis.CodexMuxAccountStatus = CodexMuxAccountStatus;
+globalThis.codexMuxScopePluginRequest = codexMuxScopePluginRequest;
 globalThis.codexMuxProfileData = codexMuxProfileData;
+globalThis.codexMuxRateLimitResets = codexMuxRateLimitResets;
+globalThis.codexMuxConsumeRateLimitReset = codexMuxConsumeRateLimitReset;
 globalThis.CodexMuxProfileAvatarStack = (props) =>
   (0, e7.jsx)(CodexMuxProfileAvatarStack, props || {});
 globalThis.CodexMuxPluginScope = () =>

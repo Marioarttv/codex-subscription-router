@@ -23,8 +23,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Guarded automatic continuation after a structured terminal usage-limit
   failure: preserve the failed turn, hand off the completed history, and send
   one text-only `Continue.` turn on the next available subscription.
-- Validated renderer patching and signing for ChatGPT `26.825.51511` build
-  `7377`.
+- Validated renderer patching and signing for ChatGPT `26.901.41600` build
+  `7982`, including its split initial/primary renderer bundles.
 - One context-aware account selector in the profile menu: it sets the next-task
   route on the home screen and moves the current task inside a conversation.
   A status-only footer always shows that scope and account; the duplicate task
