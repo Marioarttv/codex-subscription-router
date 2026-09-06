@@ -3,6 +3,13 @@
 All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and
 this project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Support ChatGPT build 8109 with verified renderer bindings and ASAR integrity.
+- Share primary conversation history while isolating router settings and tools.
+- Use a consistent router signing identity and collapse nested notification hooks.
+- Preserve the native helper filename in a router-specific folder so launches do not nest notification callbacks.
+
 ## [Unreleased]
 
 ### Added

@@ -58,7 +58,7 @@ Codex Subscription Router.app
         │ one app-server connection
         ▼
     codex-mux
-    ├── Primary       → ~/.codex
+    ├── Primary       → own settings + shared ~/.codex chat history
     ├── Subscription 2 → isolated Codex home
     └── Subscription 3 → isolated Codex home
              │
@@ -81,8 +81,8 @@ Codex Subscription Router currently targets:
 | Component | Supported value |
 | --- | --- |
 | Platform | macOS on Apple silicon |
-| Official ChatGPT version | `26.901.41600` |
-| Official bundle build | `7982` |
+| Official ChatGPT version | `26.901.51231` |
+| Official bundle build | `8109` |
 | Go | 1.26 or newer |
 | Node.js | 22.12 or newer |
 
@@ -139,7 +139,7 @@ open "$HOME/Applications/Codex Subscription Router.app"
 This creates:
 
 - `~/Applications/Codex Subscription Router.app`
-- `~/Applications/Codex Subscription Router Computer Use.app`
+- `~/Applications/Codex Subscription Router Helpers/Codex Computer Use.app`
 - an independent desktop profile under
   `~/Library/Application Support/Codex Subscription Router`
 
@@ -176,7 +176,7 @@ Open **System Settings → Privacy & Security** and grant:
 When macOS offers **Quit & Reopen**, use it. If the app does not relaunch,
 reopen Codex Subscription Router manually. If the Computer Use row does not
 appear, press the plus button and choose
-`~/Applications/Codex Subscription Router Computer Use.app`.
+`~/Applications/Codex Subscription Router Helpers/Codex Computer Use.app`.
 
 Do not select the official ChatGPT or Codex Computer Use helper for this build;
 the independent app has its own identity and permission rows. macOS may also
@@ -264,7 +264,8 @@ helper and socket paths and are not relocatable or intended for redistribution.
 
 | Path | Purpose |
 | --- | --- |
-| `~/.codex` | Primary credentials, conversations, and cache |
+| `~/.codex` | Official app settings and shared primary chat history |
+| `~/.codex-mux/primary/codex-home` | Separate router settings, credentials, plugins, and runtime state |
 | `~/.codex-mux/state.json` | Account metadata and sticky thread ownership |
 | `~/.codex-mux/accounts/<id>/codex-home` | Isolated secondary account data |
 | `~/.codex-mux/control-token` | Token for the loopback-only control service |
@@ -274,6 +275,18 @@ helper and socket paths and are not relocatable or intended for redistribution.
 The control service binds only to `127.0.0.1` and protects private routes with a
 random 256-bit token. OAuth tokens stay inside their account's Codex home and
 are never returned by the control API. Account directories are owner-only.
+
+The primary account shares the official app's live conversation database,
+sessions, archives, and writer locks. Chats created in either app are available
+in the other after its task list refreshes. The other subscriptions retain their
+own histories and credentials. Settings, tool paths, notifications, plugins,
+Chromium profiles, and macOS app identities remain separate.
+
+The installer preserves the previous primary snapshot in recoverable backups
+before linking shared history. It refuses to reconnect a snapshot containing
+newer or unique chats until they have been merged. Both the launcher and the
+Electron executable use the router signing identifier. Notification cleanup
+removes stacked Computer Use wrappers while preserving any custom user hook.
 
 Plugin configuration is intentionally synchronized from the Primary account.
 Inline secrets inside shared MCP configuration are therefore copied to each

@@ -18,6 +18,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from isolate_codex_home import migrate_primary, normalize_notification, share_primary_history, pin_router_runtime
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROJECT_VERSION = (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -27,11 +29,13 @@ DEFAULT_STATE_ROOT = Path.home() / ".codex-mux"
 CONTROL_PORT = 48123
 DESKTOP_PROFILE_NAME = "Codex Subscription Router"
 DESKTOP_BUNDLE_IDENTIFIER = "app.cdxmux.multi"
-OPENAI_DESKTOP_CODE_IDENTIFIER = "com.openai.codex"
 OPENAI_COMPUTER_USE_BUNDLE_IDENTIFIER = "com.openai.sky.CUAService"
 COMPUTER_USE_BUNDLE_IDENTIFIER = "com.cdxmux.sky.CUAService"
 COMPUTER_USE_DISPLAY_NAME = "Codex Subscription Router Computer Use"
-COMPUTER_USE_APP_NAME = f"{COMPUTER_USE_DISPLAY_NAME}.app"
+# The native service recognizes existing notify hooks by this basename.
+# Keep it canonical inside a router-owned folder to prevent nesting on launch.
+COMPUTER_USE_APP_NAME = "Codex Computer Use.app"
+COMPUTER_USE_DIRECTORY = "Codex Subscription Router Helpers"
 LAUNCH_SERVICES_REGISTER = Path(
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
     "LaunchServices.framework/Support/lsregister"
@@ -46,6 +50,7 @@ PREFERRED_SIGNING_IDENTITY_PREFIXES = (
 OPENAI_INTERNAL_TEAM_IDENTIFIER = "HX7739G8FX"
 OPENAI_DISTRIBUTION_TEAM_IDENTIFIER = "2DC432GLL2"
 TESTED_SOURCE_BUILDS = {
+    ("26.901.51231", "8109"): "64fc2f27d2dddfa968acfacbe5e4e0328071bdc406351ff4a7d18f0b4692c83d",
     (
         "26.803.61601",
         "6396",
@@ -70,6 +75,7 @@ TESTED_SOURCE_BUILDS = {
 EXPECTED_CUA_IDENTIFIER_REPLACEMENTS = 99
 EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS = 16
 TESTED_SOURCE_LAYOUTS = {
+    ("26.901.51231", "8109"): (49, 16),
     ("26.803.61601", "6396"): (49, 17),
     ("26.818.41509", "6962"): (
         EXPECTED_CUA_IDENTIFIER_REPLACEMENTS,
@@ -690,7 +696,7 @@ def sign_computer_use_code(
     sign_runtime_executable(
         app / "Contents" / "MacOS" / "ChatGPT",
         identity,
-        OPENAI_DESKTOP_CODE_IDENTIFIER,
+        DESKTOP_BUNDLE_IDENTIFIER,
         runtime=False,
     )
 
@@ -829,6 +835,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "function zbl(e){let t=(0,Wbl.c)(252),{sidebarFooter:n,triggerButton:r}=e",
         "function jwc(e){let t=(0,Iwc.c)(235),{sidebarFooter:n,triggerButton:r}=e",
         "function Gmn(e){let t=(0,uY.c)(223),{sidebarFooter:n,triggerButton:r}=e",
+        "function Ymn(e){let t=(0,sY.c)(223),{sidebarFooter:n,triggerButton:r}=e",
     )
     menu_bundle_paths = [bundle_path, *(webview / "assets").glob("app-primary-*.js")]
     matching_components = [
@@ -842,6 +849,18 @@ def patch_renderer(extracted: Path, token: str) -> None:
     menu_bundle_path, component_anchor = matching_components[0]
     menu_bundle = menu_bundle_path.read_text(encoding="utf-8")
     split_menu_bundle = menu_bundle_path != bundle_path
+    build_8109 = component_anchor.startswith("function Ymn(")
+
+    def current_bindings(text: str, mapping: dict[str, str] | None = None) -> str:
+        if not build_8109:
+            return text
+        mapping = mapping or {
+            "T2i": "v2i", "AK": "VK", "UR": "WR", "db": "Cb",
+            "D2i": "b2i", "E2i": "y2i", "pD": "lD", "bb": "Mb",
+            "O2i": "x2i", "gb": "Ob", "dD": "sD", "k2i": "S2i",
+            "d0i": "i0i", "Cb": "Fb",
+        }
+        return re.sub(r"\b[A-Za-z_$][\w$]*\b", lambda m: mapping.get(m[0], m[0]), text)
     if "function CodexMuxAccountMenu(" in menu_bundle:
         raise RuntimeError("source app already contains the Codex multiplexer menu")
     if component_anchor.startswith("function Oql("):
@@ -882,6 +901,13 @@ def patch_renderer(extracted: Path, token: str) -> None:
             ("QLs", "swo"),
             ("S2", "VQ"),
             ("jLa", "uRo"),
+        ):
+            component = re.sub(rf"\b{re.escape(original)}\b", replacement, component)
+    elif component_anchor.startswith("function Ymn("):
+        for original, replacement in (
+            ("e7", "cY"), ("kXc", "ehn"), ("_H", "xl"),
+            ("CH", "Sy"), ("Lo", "zx"), ("Q", "qv"),
+            ("BW", "QC"), ("QLs", "tq"), ("S2", "jq"), ("jLa", "gV"),
         ):
             component = re.sub(rf"\b{re.escape(original)}\b", replacement, component)
     elif component_anchor.startswith("function Gmn("):
@@ -1007,6 +1033,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "let e=await wb.safeGet(`/wham/profiles/me`)",
         "let e=await uS.safeGet(`/wham/profiles/me`)",
         "let e=await DO.safeGet(`/wham/profiles/me`)",
+        "let e=await _O.safeGet(`/wham/profiles/me`)",
     )
     matching_profile_query_anchors = [
         anchor for anchor in profile_query_anchors if bundle.count(anchor) == 1
@@ -1026,6 +1053,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "function Bsc(e){",
         "function H6s(e){",
         "function iq(e){",
+        "function tq(e){",
     )
     matching_usage_modal_anchors = [
         anchor for anchor in native_usage_modal_anchors if menu_count(anchor) == 1
@@ -1106,7 +1134,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         1,
                     )
                 else:
-                    reset_query_anchor = (
+                    reset_query_anchor = current_bindings(
                         "function T2i(){let e=(0,AK.c)(1);UR(),db(null);let t;return "
                         "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
                         "(t={queryKey:[`rate-limit-reset-credits`],queryFn:D2i,"
@@ -1117,12 +1145,12 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         raise RuntimeError("could not find the native reset-credit query")
                     bundle = bundle.replace(
                         reset_query_anchor,
-                        "function T2i(){UR(),db(null);"
+                        current_bindings("function T2i(){UR(),db(null);"
                         "let e=window.__codexMuxResetAccountId;return bb({"
                         "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
                         "queryFn:e?()=>globalThis.codexMuxRateLimitResets(e):D2i,"
                         "select:E2i,refetchInterval:pD.ONE_MINUTE,"
-                        "staleTime:pD.FIVE_SECONDS})}",
+                        "staleTime:pD.FIVE_SECONDS})}"),
                         1,
                     )
 
@@ -1215,7 +1243,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         1,
                     )
                 else:
-                    reset_mutation_anchor = (
+                    reset_mutation_anchor = current_bindings(
                         "function O2i(){let e=(0,AK.c)(3),t=gb(),n=dD(),r;return "
                         "e[0]!==n||e[1]!==t?(r={mutationFn:k2i,onSuccess:(e,r)=>{"
                         "let{creditId:i}=r,a=e.code;if(a===`reset`||"
@@ -1229,14 +1257,14 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         raise RuntimeError("could not find the native reset-credit mutation")
                     bundle = bundle.replace(
                         reset_mutation_anchor,
-                        "function O2i(){let e=gb(),t=dD(),"
+                        current_bindings("function O2i(){let e=gb(),t=dD(),"
                         "n=window.__codexMuxResetAccountId,"
                         "r=[`rate-limit-reset-credits`,n??`primary`];return Cb({"
                         "mutationFn:n?i=>globalThis.codexMuxConsumeRateLimitReset(n,i):k2i,"
                         "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
                         "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
                         "n.credit?.id??a:a;e.setQueryData(r,e=>d0i(e,o,t))}"
-                        "Promise.all([t([`rate-limit-status`]),t(r)])}})}",
+                        "Promise.all([t([`rate-limit-status`]),t(r)])}})}"),
                         1,
                     )
 
@@ -1292,20 +1320,22 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         "window.__codexMuxResetAccountSelector??null]});",
                     )
                 else:
-                    usage_header_anchor = (
+                    usage_header_anchor = current_bindings(
                         "let ge;t[46]===me?ge=t[47]:"
                         "(ge=(0,rq.jsxs)(iE,{children:[me,he]}),"
-                        "t[46]=me,t[47]=ge);"
+                        "t[46]=me,t[47]=ge);",
+                        {"ge": "_e", "me": "he", "he": "ge", "rq": "eq", "iE": "mw"},
                     )
                     if menu_count(usage_header_anchor) != 1:
                         raise RuntimeError("could not find the native Usage sheet header")
                     menu_replace(
                         usage_header_anchor,
-                        "let ge=(0,rq.jsxs)(iE,{children:[me,he,"
+                        current_bindings("let ge=(0,rq.jsxs)(iE,{children:[me,he,"
                         "window.__codexMuxResetAccountSelector??null]});",
+                            {"ge": "_e", "me": "he", "he": "ge", "rq": "eq", "iE": "mw"}),
                     )
 
-    usage_anchors = ("usageItems:Ge", "usageItems:Ct", "usageItems:Et")
+    usage_anchors = ("usageItems:Ge", "usageItems:Ct", "usageItems:Et", "usageItems:Dt")
     matching_usage_anchors = [
         anchor for anchor in usage_anchors if menu_count(anchor) == 1
     ]
@@ -1318,6 +1348,8 @@ def patch_renderer(extracted: Path, token: str) -> None:
         usage_jsx_runtime = "u8"
     elif component_anchor.startswith("function Gmn("):
         usage_jsx_runtime = "dY"
+    elif component_anchor.startswith("function Ymn("):
+        usage_jsx_runtime = "cY"
     else:
         usage_jsx_runtime = "d7" if usage_anchor == "usageItems:Ct" else "e7"
     menu_replace(
@@ -1345,7 +1377,14 @@ def patch_renderer(extracted: Path, token: str) -> None:
         "triggerButton:At,onOpenChange:c,children:[F,null]",
         "open:s,onOpenChange:c,contentWidth:`panel`,triggerButton:At,children:Vt",
     )
-    if all(menu_count(anchor) == 1 for anchor in legacy_open_change_anchors):
+    build_8109_open_change_anchors = (
+        "triggerButton:jt,onOpenChange:c,children:[F,null]",
+        "open:s,onOpenChange:c,contentWidth:`panel`,triggerButton:jt,children:Ht",
+    )
+    if build_8109 and all(menu_count(anchor) == 1 for anchor in build_8109_open_change_anchors):
+        open_change_anchors = build_8109_open_change_anchors
+        open_change_handler = "c"
+    elif all(menu_count(anchor) == 1 for anchor in legacy_open_change_anchors):
         open_change_anchors = legacy_open_change_anchors
         open_change_handler = "o"
     elif all(menu_count(anchor) == 1 for anchor in modern_open_change_anchors):
@@ -1486,17 +1525,18 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         1,
                     )
                 else:
-                    profile_section_anchor = (
+                    profile_section_anchor = current_bindings(
                         "let Et;t[91]!==wt||t[92]!==Tt?"
                         "(Et=(0,$.jsx)(`section`,{\"aria-busy\":wt,"
                         "className:`flex flex-col items-center`,children:Tt}),"
-                        "t[91]=wt,t[92]=Tt,t[93]=Et):Et=t[93];"
+                        "t[91]=wt,t[92]=Tt,t[93]=Et):Et=t[93];",
+                        {"Et": "wt", "wt": "St", "Tt": "Ct", "B": "M"},
                     )
                     if profile_bundle.count(profile_section_anchor) != 1:
                         raise RuntimeError("could not find the native Profile avatar")
                     profile_bundle = profile_bundle.replace(
                         profile_section_anchor,
-                        "let Et;t[91]!==wt||t[92]!==Tt?"
+                        current_bindings("let Et;t[91]!==wt||t[92]!==Tt?"
                         "(Et=(0,$.jsxs)(`section`,{\"aria-busy\":wt,"
                         "className:`flex flex-col items-center`,children:["
                         "globalThis.CodexMuxProfileAvatarStack?.("
@@ -1504,6 +1544,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
                         "globalThis.__codexMuxSelectedProfileAccountId&&!B.isFetching?"
                         "`contents`:`hidden`,children:Tt})]}),"
                         "t[91]=wt,t[92]=Tt,t[93]=Et):Et=t[93];",
+                            {"Et": "wt", "wt": "St", "Tt": "Ct", "B": "M"}),
                         1,
                     )
     profile_bundle_path.write_text(profile_bundle, encoding="utf-8")
@@ -1753,9 +1794,11 @@ def patch_app(
                 "reuse the prior identity or pass --allow-signing-team-change"
             )
     destination.parent.mkdir(parents=True, exist_ok=True)
-    installed_computer_use_app = destination.parent / COMPUTER_USE_APP_NAME
+    installed_computer_use_app = destination.parent / COMPUTER_USE_DIRECTORY / COMPUTER_USE_APP_NAME
+    legacy_computer_use_app = destination.parent / f"{COMPUTER_USE_DISPLAY_NAME}.app"
     if force:
-        ensure_components_are_stopped((destination, installed_computer_use_app))
+        ensure_components_are_stopped((destination, installed_computer_use_app, legacy_computer_use_app))
+    installed_computer_use_app.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix=".codex-subscription-router-", dir=destination.parent) as temporary:
         temporary_path = Path(temporary)
@@ -1836,7 +1879,7 @@ def patch_app(
         )
         verify_signed_code(
             staged_app / "Contents" / "MacOS" / "ChatGPT",
-            OPENAI_DESKTOP_CODE_IDENTIFIER,
+            DESKTOP_BUNDLE_IDENTIFIER,
             team_identifier,
         )
         bundled_computer_use_app = (
@@ -1854,6 +1897,16 @@ def patch_app(
             COMPUTER_USE_BUNDLE_IDENTIFIER,
             team_identifier,
         )
+
+        print("Preparing isolated primary account data…")
+        router_home = migrate_primary(DEFAULT_STATE_ROOT)
+        pin_router_runtime(router_home / "config.toml", destination, router_home, installed_computer_use_app)
+        normalize_notification(
+            router_home / "config.toml",
+            installed_computer_use_app / "Contents" / "SharedSupport"
+            / "SkyComputerUseClient.app" / "Contents" / "MacOS" / "SkyComputerUseClient",
+        )
+        share_primary_history(router_home, Path.home() / ".codex", DEFAULT_STATE_ROOT / "backups")
 
         backup_suffix = time.strftime("%Y%m%d-%H%M%S")
         backup_directory = DEFAULT_STATE_ROOT / "backups" / backup_suffix
@@ -1888,6 +1941,10 @@ def patch_app(
             if helper_backup.exists():
                 helper_backup.rename(installed_computer_use_app)
             raise
+
+    if legacy_computer_use_app.exists():
+        backup_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        legacy_computer_use_app.rename(backup_directory / legacy_computer_use_app.name)
 
     if LAUNCH_SERVICES_REGISTER.is_file():
         run(

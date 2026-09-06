@@ -53,7 +53,7 @@ func run() error {
 	}
 	primaryCodexHome := os.Getenv("CODEX_HOME")
 	if primaryCodexHome == "" {
-		primaryCodexHome = filepath.Join(home, ".codex")
+		primaryCodexHome = filepath.Join(root, "primary", "codex-home")
 	}
 	store, err := state.Open(root, primaryCodexHome)
 	if err != nil {

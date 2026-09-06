@@ -6,6 +6,13 @@ stops instead of applying a partial patch.
 
 ## Release 0.1.0
 
+- Build 8109 (`26.901.51231`) is supported with updated profile, usage, and reset
+  renderer bindings. ASAR SHA-256:
+  `64fc2f27d2dddfa968acfacbe5e4e0328071bdc406351ff4a7d18f0b4692c83d`.
+- Its conversation schema was checked against build 7982 before enabling shared
+  primary history. Router configuration and macOS identities stay separate.
+
+
 | Component | Tested value |
 | --- | --- |
 | Official ChatGPT version | `26.803.61601` |

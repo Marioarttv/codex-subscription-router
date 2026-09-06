@@ -15,7 +15,8 @@ with a small Go multiplexer and keeps the original binary beside it as
 
 The desktop app opens one JSON-RPC app-server connection to the multiplexer.
 The multiplexer starts one real app-server child for every enabled account,
-each with its own `CODEX_HOME` and `CODEX_SQLITE_HOME`.
+each with its own `CODEX_HOME`. The primary child points `CODEX_SQLITE_HOME`
+to the official app's history directory; secondary children keep their own databases.
 
 New threads use the manually selected account when that subscription is
 connected and both its five-hour and weekly windows have capacity. With
@@ -52,7 +53,9 @@ continuations. Threads do not migrate for ordinary load balancing.
 
 ## Account isolation
 
-The Primary account uses `~/.codex`. Added accounts use
+The Primary account uses `~/.codex-mux/primary/codex-home` for app settings
+and credentials, with live history shared through `~/.codex` and linked session
+and writer-lock directories. Added accounts use
 `~/.codex-mux/accounts/<id>/codex-home`. Managed configuration is copied from
 the Primary account, excluding credential-store settings and project trust.
 Each isolated account forces file-backed CLI and MCP OAuth credentials.

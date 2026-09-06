@@ -47,8 +47,7 @@ type Child struct {
 }
 
 func Start(accountID, codexHome, executable string, args, baseEnv []string, inbound chan<- Inbound) (*Child, error) {
-	env := withEnvironment(baseEnv, "CODEX_HOME", codexHome)
-	env = withEnvironment(env, "CODEX_SQLITE_HOME", codexHome)
+	env := childEnvironment(accountID, codexHome, baseEnv)
 	command := exec.Command(executable, args...)
 	command.Env = env
 	stdin, err := command.StdinPipe()
@@ -78,6 +77,21 @@ func Start(accountID, codexHome, executable string, args, baseEnv []string, inbo
 	go child.readLoop(stdout)
 	go child.waitLoop()
 	return child, nil
+}
+
+// Share only the primary account's conversation database with the official
+// app. Every child still reads its own config and credentials from CODEX_HOME.
+func childEnvironment(accountID, codexHome string, baseEnv []string) []string {
+	sqliteHome := codexHome
+	if accountID == "primary" {
+		for _, entry := range baseEnv {
+			if value, ok := strings.CutPrefix(entry, "CODEX_MUX_PRIMARY_SQLITE_HOME="); ok && value != "" {
+				sqliteHome = value
+			}
+		}
+	}
+	env := withEnvironment(baseEnv, "CODEX_HOME", codexHome)
+	return withEnvironment(env, "CODEX_SQLITE_HOME", sqliteHome)
 }
 
 func (c *Child) AccountID() string {

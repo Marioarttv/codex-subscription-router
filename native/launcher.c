@@ -41,6 +41,25 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    /* Set this before Electron imports any modules or creates its app server.
+     * The official app's configuration must never receive router tool paths. */
+    char codex_home[PATH_MAX];
+    if (snprintf(codex_home, sizeof(codex_home),
+                 "%s/.codex-mux/primary/codex-home", home) >= (int)sizeof(codex_home) ||
+        setenv("CODEX_HOME", codex_home, 1) != 0 ||
+        setenv("CODEX_SQLITE_HOME", codex_home, 1) != 0) {
+        perror("Codex Subscription Router data directory");
+        return EXIT_FAILURE;
+    }
+    char shared_history[PATH_MAX];
+    if (snprintf(shared_history, sizeof(shared_history), "%s/.codex", home) >=
+        (int)sizeof(shared_history) ||
+        setenv("CODEX_MUX_PRIMARY_SQLITE_HOME", shared_history, 1) != 0 ||
+        setenv("CODEX_SQLITE_HOME", shared_history, 1) != 0) {
+        perror("Codex Subscription Router shared history");
+        return EXIT_FAILURE;
+    }
+
     char profile[PATH_MAX];
     if (snprintf(profile, sizeof(profile),
                  "--user-data-dir=%s/Library/Application Support/Codex Subscription Router",
