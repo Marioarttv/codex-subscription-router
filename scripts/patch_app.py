@@ -50,6 +50,7 @@ PREFERRED_SIGNING_IDENTITY_PREFIXES = (
 OPENAI_INTERNAL_TEAM_IDENTIFIER = "HX7739G8FX"
 OPENAI_DISTRIBUTION_TEAM_IDENTIFIER = "2DC432GLL2"
 TESTED_SOURCE_BUILDS = {
+    ("26.930.61225", "13232"): "88b8cce6f627771bf341f5a6bb464ad220749b0d442d44f618d7741c2de7318b",
     ("26.901.51231", "8109"): "64fc2f27d2dddfa968acfacbe5e4e0328071bdc406351ff4a7d18f0b4692c83d",
     (
         "26.803.61601",
@@ -75,6 +76,7 @@ TESTED_SOURCE_BUILDS = {
 EXPECTED_CUA_IDENTIFIER_REPLACEMENTS = 99
 EXPECTED_ASAR_CUA_IDENTIFIER_REPLACEMENTS = 16
 TESTED_SOURCE_LAYOUTS = {
+    ("26.930.61225", "13232"): (49, 16),
     ("26.901.51231", "8109"): (49, 16),
     ("26.803.61601", "6396"): (49, 17),
     ("26.818.41509", "6962"): (
@@ -804,6 +806,11 @@ def ensure_asar_tool() -> Path:
 
 
 def patch_renderer(extracted: Path, token: str) -> None:
+    # The Rolldown build separates menu items, reset modal and RPC transport.
+    if (extracted / "webview" / "assets" / "app-initial-69cd8dbddec5.js").is_file():
+        from patch_build_13232 import patch_renderer as patch_current_renderer
+        patch_current_renderer(extracted, token, PROJECT_ROOT, CONTROL_PORT)
+        return
     webview = extracted / "webview"
     index_path = webview / "index.html"
     index = index_path.read_text(encoding="utf-8")
@@ -1611,6 +1618,9 @@ def patch_desktop_profile(
         r"await [A-Za-z_$][\w$]*\.initialize\(\);"
         r"(?=(?:try\{)?let\{runMainAppStartup:)"
     )
+    if "if(await n.initialize(),r&&a&&jTe(),r||i)" in bootstrap:
+        # Keep bootstrap/runtime selection intact; skip only updater initialization.
+        updater_pattern = re.compile(r"await n\.initialize\(\),(?=r&&a&&jTe\(\),r\|\|i)")
     bootstrap, updater_replacements = updater_pattern.subn("", bootstrap, count=1)
     if updater_replacements != 1:
         raise RuntimeError("could not disable updates in the copied ChatGPT app")
@@ -1706,6 +1716,41 @@ def patch_info_plist(
     }
     with plist_path.open("wb") as handle:
         plistlib.dump(info, handle, fmt=plistlib.FMT_BINARY, sort_keys=False)
+
+
+def patch_integrity_dictionary_digest(app: Path, original_integrity: dict, identity: str) -> None:
+    """Update Electron 154's embedded digest without disabling ASAR validation.
+
+    Electron hashes the sorted path, algorithm and header hash strings together.
+    Verify the existing slot against the official plist before replacing it.
+    """
+    def digest(integrity: dict) -> bytes:
+        return hashlib.sha256("".join(
+            path + value["algorithm"] + value["hash"]
+            for path, value in sorted(integrity.items())
+        ).encode("utf-8")).digest()
+
+    framework = app / "Contents" / "Frameworks" / "Codex Framework.framework"
+    executable = bundle_main_executable(framework)
+    if executable is None:
+        raise RuntimeError("could not find the Electron integrity framework")
+    binary = executable.read_bytes()
+    sentinel = b"AGbevlPCksUGKNL8TSn7wGmJEuJsXb2A"
+    if binary.count(sentinel) != 1:
+        raise RuntimeError("expected one Electron integrity dictionary digest slot")
+    offset = binary.index(sentinel) + len(sentinel)
+    if binary[offset:offset + 2] != b"\x01\x01" or binary[offset + 2:offset + 34] != digest(original_integrity):
+        raise RuntimeError("the embedded Electron integrity digest does not match the official plist")
+    with (app / "Contents" / "Info.plist").open("rb") as handle:
+        integrity = plistlib.load(handle)["ElectronAsarIntegrity"]
+    binary = binary[:offset + 2] + digest(integrity) + binary[offset + 34:]
+    executable.write_bytes(binary)
+    # Helpers enforce library validation when loading the modified framework.
+    # Reuse their runtime entitlements and put the whole runtime on one team.
+    helpers = framework / "Versions" / "Current" / "Helpers"
+    for helper in sorted(helpers.glob("*.app")):
+        sign_runtime_bundle(helper, identity)
+    sign_runtime_bundle(framework, identity)
 
 
 def patch_app(
@@ -1853,6 +1898,15 @@ def patch_app(
 
         bundled_codex = resources / "codex"
         real_codex = resources / "codex.real"
+        if source_build_key == ("26.930.61225", "13232"):
+            # Preserve the signed CLI app and its package-relative resources.
+            # Wrap its shell entrypoint; keep the legacy tool path as an alias.
+            bundled_codex = resources / "codex-cli" / "bin" / "codex"
+            real_codex = bundled_codex.with_name("codex.real")
+            if not bundled_codex.is_file() or not bundled_codex.read_bytes().startswith(b"#!/bin/sh\n"):
+                raise RuntimeError("the packaged CLI entrypoint changed")
+            (resources / "codex").symlink_to("codex-cli/bin/codex")
+            (resources / "codex.real").symlink_to("codex-cli/bin/codex.real")
         if real_codex.exists():
             raise RuntimeError("source app already contains codex.real")
         bundled_codex.rename(real_codex)
@@ -1865,6 +1919,8 @@ def patch_app(
             team_identifier,
             use_header_asar_integrity,
         )
+        if source_build_key == ("26.930.61225", "13232"):
+            patch_integrity_dictionary_digest(staged_app, source_info["ElectronAsarIntegrity"], signing_identity)
         print(f"Signing independent app copy with {signing_identity}…")
         sign_independent_app(
             staged_app,

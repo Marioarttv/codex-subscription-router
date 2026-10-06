@@ -5,6 +5,11 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- Support official build 13232 with reviewed Rolldown chunks and the packaged CLI layout.
+- Keep Electron 154 ASAR validation enabled by updating its embedded dictionary digest and signing its runtime helpers with one team.
+- Pin the launcher to the router CLI, support memory-based conversation navigation and compact sidebar status, and keep Primary reset requests on the native authenticated transport.
+- Preserve custom notification hooks when newer desktop builds write multiline TOML arrays.
+
 - Support ChatGPT build 8109 with verified renderer bindings and ASAR integrity.
 - Share primary conversation history while isolating router settings and tools.
 - Use a consistent router signing identity and collapse nested notification hooks.

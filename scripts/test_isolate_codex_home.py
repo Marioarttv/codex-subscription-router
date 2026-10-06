@@ -73,6 +73,22 @@ class HomeIsolationTests(unittest.TestCase):
             self.assertEqual((copied / "sessions" / "task.jsonl").read_text(), "router-only\n")
             db.close()
 
+    def test_multiline_notification_preserves_custom_hook_and_following_settings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.toml"
+            custom = ["custom-notifier", "a bracket ] inside a string"]
+            wrapper = ["/old/SkyComputerUseClient", "turn-ended", "--previous-notify", json.dumps(custom)]
+            tail = '\nmodel = "test"\n[mcp_servers.tool]\ncommand = "custom"\n'
+            config.write_text("notify = " + json.dumps(wrapper, indent=4) + tail)
+            normalize_notification(config, Path("/new/SkyComputerUseClient"))
+            result = config.read_text()
+            self.assertEqual(tomllib.loads(result), {
+                "notify": ["/new/SkyComputerUseClient", "turn-ended", "--previous-notify", json.dumps(custom)],
+                "model": "test", "mcp_servers": {"tool": {"command": "custom"}}})
+            self.assertTrue(result.endswith(tail))
+            normalize_notification(config, Path("/new/SkyComputerUseClient"))
+            self.assertEqual(config.read_text(), result)
+
     def test_migration_preserves_accounts_and_owners(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

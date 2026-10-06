@@ -60,6 +60,15 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    /* A launch from another Codex instance may inherit its CLI override.
+     * Always route this desktop through the bundled multiplexer. */
+    char codex_cli[PATH_MAX];
+    if (snprintf(codex_cli, sizeof(codex_cli), "%s/../Resources/codex", directory) >=
+        (int)sizeof(codex_cli) || setenv("CODEX_CLI_PATH", codex_cli, 1) != 0) {
+        perror("Codex Subscription Router CLI");
+        return EXIT_FAILURE;
+    }
+
     char profile[PATH_MAX];
     if (snprintf(profile, sizeof(profile),
                  "--user-data-dir=%s/Library/Application Support/Codex Subscription Router",
