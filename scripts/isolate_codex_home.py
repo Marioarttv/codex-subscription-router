@@ -46,12 +46,22 @@ def normalize_notification(config_path: Path, helper: Path) -> None:
     hook = [str(helper), "turn-ended"]
     if previous:
         hook.extend(["--previous-notify", json.dumps(previous)])
-    # Desktop writes this as a single top-level TOML line. Reject an unknown
-    # representation rather than dropping unrelated user configuration.
+    # New desktop builds pretty-print arrays over multiple lines. Find the
+    # complete TOML value with the parser rather than counting brackets inside
+    # shell arguments or JSON strings belonging to a custom notification hook.
     lines = contents.splitlines(keepends=True)
     for index, line in enumerate(lines):
         if line.strip().startswith("notify ="):
-            lines[index] = "notify = " + json.dumps(hook) + "\n"
+            for end in range(index + 1, len(lines) + 1):
+                try:
+                    value = tomllib.loads("".join(lines[index:end]))
+                except tomllib.TOMLDecodeError:
+                    continue
+                if value == {"notify": parsed["notify"]}:
+                    lines[index:end] = ["notify = " + json.dumps(hook) + "\n"]
+                    break
+            else:
+                raise RuntimeError("unrecognized notification array")
             break
     else:
         raise RuntimeError("unrecognized notification configuration")

@@ -37,6 +37,10 @@ async function codexMuxRequest(path, options = {}) {
 }
 
 function codexMuxThreadIdFromLocation() {
+  // New desktops use an in-memory router while the document URL stays fixed.
+  if (Object.hasOwn(globalThis, "__codexMuxNativeThreadId")) {
+    return globalThis.__codexMuxNativeThreadId;
+  }
   const match = window.location.pathname.match(
     /\/(?:local|work\/conversation)\/([^/?#]+)/,
   );
@@ -226,7 +230,14 @@ function codexMuxStartAccountContext() {
 }
 
 function CodexMuxUseAccountContext() {
+  const nativeThreadId = globalThis.codexMuxNativeThreadIdHook?.();
+  if (globalThis.codexMuxNativeThreadIdHook) {
+    globalThis.__codexMuxNativeThreadId = nativeThreadId ?? null;
+  }
   const [state, setState] = kXc.useState(codexMuxAccountContextState);
+  kXc.useEffect(() => {
+    if (globalThis.codexMuxNativeThreadIdHook) codexMuxRefreshAccountContext();
+  }, [nativeThreadId]);
   kXc.useEffect(() => {
     codexMuxStartAccountContext();
     codexMuxAccountContextListeners.add(setState);
@@ -236,7 +247,7 @@ function CodexMuxUseAccountContext() {
   return state;
 }
 
-function CodexMuxAccountStatus() {
+function CodexMuxAccountStatus({ compact = false } = {}) {
   const state = CodexMuxUseAccountContext();
   const account = codexMuxAccountContextAccount(state);
   const currentTask = Boolean(state.threadId);
@@ -272,7 +283,7 @@ function CodexMuxAccountStatus() {
         : (0, e7.jsx)(CodexMuxAutoIcon, {
             className: "size-5 shrink-0 text-token-text-secondary",
           }),
-      (0, e7.jsxs)("span", {
+      !compact && (0, e7.jsxs)("span", {
         className: "flex min-w-0 flex-1 flex-col leading-tight",
         children: [
           (0, e7.jsx)("span", {
@@ -325,12 +336,18 @@ async function codexMuxProfileData(accountId = null) {
 }
 
 async function codexMuxRateLimitResets(accountId) {
+  if (accountId === "primary" && globalThis.codexMuxNativeRateLimitResets) {
+    return globalThis.codexMuxNativeRateLimitResets();
+  }
   return codexMuxRequest(
     `/accounts/${encodeURIComponent(accountId)}/rate-limit-resets`,
   );
 }
 
 async function codexMuxConsumeRateLimitReset(accountId, input) {
+  if (accountId === "primary" && globalThis.codexMuxNativeConsumeRateLimitReset) {
+    return globalThis.codexMuxNativeConsumeRateLimitReset(input);
+  }
   return codexMuxRequest(
     `/accounts/${encodeURIComponent(accountId)}/rate-limit-resets/consume`,
     {
